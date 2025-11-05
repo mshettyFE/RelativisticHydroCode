@@ -25,6 +25,10 @@ class BoundaryConditionManager:
         assert( (index>=0) and (index < len(self.left_bcs)))
         return (self.left_bcs[index], self.right_bcs[index])
 
+class TimeUpdate(Enum):
+    EULER = 0 
+    RK3 = 1
+
 class CoordinateChoice(Enum):
     CARTESIAN = 0 
     SPHERICAL = 1
@@ -41,6 +45,7 @@ class SimParams:
     GM: np.float64
     coordinate_system: CoordinateChoice
     include_source: bool
+    time_integration: TimeUpdate 
 
 class GridInfo:
     leftmost_edges: npt.NDArray
@@ -248,19 +253,37 @@ def SourceTerm(U:npt.ArrayLike, initial_params: InitialParameters):
     S_2 = 1.0*(-W[:,PrimativeIndex.DENSITY.value]*W[:,PrimativeIndex.VELOCITY.value]*initial_params.simulation_params.GM) 
     return np.stack([S_0,S_1,S_2], axis=1) 
 
+def LinearUpdate(U_padded: npt.ArrayLike, global_parameters: InitialParameters): 
+    flux_change, alpha_plus, alpha_minus = spatial_derivative(U_padded, global_parameters, 0)
+    dt = calc_dt(alpha_plus, alpha_minus, global_parameters)
+    state_update = flux_change
+    if(global_parameters.simulation_params.include_source):
+        state_update += SourceTerm(U_padded[1:-1], global_parameters)
+    return dt, state_update
+
 def update(U: npt.ArrayLike, current_time: np.float64, global_parameters: InitialParameters) -> tuple[np.float64, npt.NDArray]:
     assert(U.shape== global_parameters.initial_weighted_U.shape)
     # Undo scaling for input
     U_scaled = global_parameters.grid_info.unweight_vector(U, global_parameters.simulation_params.coordinate_system, WeightType.CENTER)
     U_padded = pad_array(U_scaled, global_parameters )
-    #print("Initial U", U, "Rescaled", U_scaled, "Padded", U_padded)
-    flux_change, alpha_plus, alpha_minus = spatial_derivative(U_padded, global_parameters, 0)
-    dt = calc_dt(alpha_plus, alpha_minus, global_parameters)
-    state_update = flux_change*dt
-    if(global_parameters.simulation_params.include_source):
-        state_update += dt*(SourceTerm(U_padded[1:-1], global_parameters))
-    return current_time+dt, U+state_update
+    dt, state_update_1 = LinearUpdate(U_padded, global_parameters)
+    U_1 = U+dt*state_update_1
 
+    match global_parameters.simulation_params.time_integration:
+        case TimeUpdate.EULER:
+            return current_time+dt, U_1
+        case TimeUpdate.RK3:
+            U_scaled_1 = global_parameters.grid_info.unweight_vector(U_1, global_parameters.simulation_params.coordinate_system, WeightType.CENTER)
+            U_padded_1 = pad_array(U_scaled_1, global_parameters )
+            _, state_update_2 = LinearUpdate(U_padded_1, global_parameters)
+            U_2 = (3/4)*U+(1/4)*U_1+(1/4)*dt*state_update_2 
+            U_scaled_2 = global_parameters.grid_info.unweight_vector(U_2, global_parameters.simulation_params.coordinate_system, WeightType.CENTER)
+            U_padded_2 = pad_array(U_scaled_2, global_parameters )
+            _, state_update_3 = LinearUpdate(U_padded_2, global_parameters)
+            return current_time+dt, (1/3)*U+(2/3)*U_2+(2/3)*dt*state_update_3
+        case _:
+            raise Exception("Unimplemented TimeUpdate Method")
+ 
 def pad_array(var:npt.ArrayLike,global_parameters: InitialParameters):
     # Augment the array to incorporate the BCs
     # Assuming that var is Cartesian
@@ -298,14 +321,14 @@ def save_results(
 
 def plot_results(
     input_pkl_file: str = "snapshot.pkl",
-    n_snapshots: int = 6,
     filename: str = "sod_shock_evolution.png",
     title: str = "Sod Shock Tube Evolution (HLL Flux)",
-    xlabel: str = "x"
+    xlabel: str = "x",
+    show_mach: bool = False
 ):
 # GPT generated w/ edits b/c plotting is a pain...
 # Prompt was that after debugging the above, it offered to plot the results 
-# I said yes, but use the history list, save it to a png file, and only plot every n_snapshot profiles
+# I said yes, but use the history list, save it to a png filename
 # I also cleaned up extraneous variables and the like
     with open(input_pkl_file, 'rb') as f:
         history, params = pkl.load(f)
@@ -313,33 +336,33 @@ def plot_results(
     support = params.grid_info.construct_grid_centers(0)
     assert(N==support.shape[0])
 
-    # Choose evenly spaced snapshots
-    indices = np.linspace(0, len(history) - 1, n_snapshots, dtype=int)
+    if(show_mach):
+        fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    else:
+        fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
-    fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    t, U = history[-1]
+    W = conservative_to_primitive(U, params)
 
-    for i, idx in enumerate(indices):
-        t, U = history[idx]
-        W = conservative_to_primitive(U, params)
+    rho = W[:, PrimativeIndex.DENSITY.value]
+    v = W[:, PrimativeIndex.VELOCITY.value]
+    P = W[:, PrimativeIndex.PRESSURE.value]
+    c_s = sound_speed(W, params)
 
-        rho = W[:, PrimativeIndex.DENSITY.value]
-        v = W[:, PrimativeIndex.VELOCITY.value]
-        P = W[:, PrimativeIndex.PRESSURE.value]
-        c_s = sound_speed(W, params)
+    label = f"t = {t:.3f}"
 
-        color = plt.cm.viridis(i / (n_snapshots - 1))
-        label = f"t = {t:.3f}"
-
-        axes[0].plot(support, rho, color=color, label=label)
-        axes[1].plot(support, v, color=color)
-        axes[2].plot(support, P, color=color)
-        axes[3].plot(support, np.abs(v)/c_s, color=color)
+    axes[0].plot(support, rho,label=label)
+    axes[1].plot(support, v)
+    axes[2].plot(support, P)
+    if(show_mach):
+        axes[3].plot(support, np.abs(v)/c_s )
 
     axes[0].set_ylabel(r"$\rho$")
     axes[1].set_ylabel(r"$v$")
     axes[2].set_ylabel(r"$P$")
-    axes[3].set_ylabel(r"$M$")
-    axes[3].axhline(y=1, color='black', linestyle='--', linewidth=1)
+    if(show_mach):
+        axes[3].set_ylabel(r"$M$")
+        axes[3].axhline(y=1, color='black', linestyle='--', linewidth=1)
     for i, idx in enumerate(axes):
         axes[i].set_xlabel(xlabel)
 
@@ -351,9 +374,10 @@ def plot_results(
 
 def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                            rho_r:np.float64, v_r: np.float64, P_r:np.float64,
-                           N_cells: np.int64 = 10000) -> InitialParameters:
+                           N_cells: np.int64 = 10000,
+                           t_max: np.float64 = 0.2) -> InitialParameters:
     grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
-    simulation_params = SimParams(1.4, 0.5, 0.2, 1.0, CoordinateChoice.CARTESIAN,include_source=False)
+    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, CoordinateChoice.CARTESIAN,include_source=False, time_integration=TimeUpdate.RK3)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
@@ -369,6 +393,11 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
     initial_conds = primitive_to_conservative(primitives, simulation_params)
     return InitialParameters(grid_info, simulation_params, bcm, initial_conds)
 
+def M_dot(U_profiles: npt.ArrayLike, params: InitialParameters):
+    r_center = params.grid_info.construct_grid_centers(0) 
+    W = conservative_to_primitive(U_profiles, params)
+    return W[:, PrimativeIndex.DENSITY.value]*W[:,PrimativeIndex.VELOCITY.value]*r_center
+
 def BondiAccretionInitialization(
         rho: np.float64,
         v: np.float64,
@@ -376,7 +405,7 @@ def BondiAccretionInitialization(
         N_cells: np.float64
     ):
     grid_info = GridInfo(np.array([0.1]), np.array([1.1]), np.array([N_cells]))
-    simulation_params = SimParams(1.4, 0.5, 2.0,1.0, CoordinateChoice.SPHERICAL, include_source=True) 
+    simulation_params = SimParams(1.4, 0.2, 2.0,1.0, CoordinateChoice.SPHERICAL, include_source=True, time_integration=TimeUpdate.EULER) 
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
@@ -387,7 +416,7 @@ def BondiAccretionInitialization(
     return InitialParameters(grid_info, simulation_params, bcm, initial_conds)
 
 def CartesianSodProblem():
-    initial_params = SodShockInitialization(1.0,0.0,1.0, 0.125, 0.0, 0.1)
+    initial_params = SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2)
     state = initial_params.initial_weighted_U
     current_time = 0.0 
     history = []
@@ -397,6 +426,22 @@ def CartesianSodProblem():
         current_time, state = updated_state
     save_results(history,initial_params)
 
+def HarderSodProblem():
+    initial_params = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, t_max=0.1)
+    state = initial_params.initial_weighted_U
+    current_time = 0.0 
+    history = []
+    iteration  = 0
+    while(current_time < initial_params.simulation_params.t_max):
+        updated_state = update(state, current_time, initial_params)
+        if(iteration%100==0):
+            #print(iteration, current_time, initial_params.simulation_params.t_max)
+            history.append(updated_state)
+        history.append(updated_state)
+        current_time, state = updated_state
+        iteration += 1
+    save_results(history,initial_params)
+
 def BondiAccretionProblem():
     initial_params = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
     state = initial_params.initial_weighted_U 
@@ -404,14 +449,72 @@ def BondiAccretionProblem():
     history = []
     iteration = 0
     while(current_time < initial_params.simulation_params.t_max):
-        print(current_time, initial_params.simulation_params.t_max)
+        #print(iteration, current_time, initial_params.simulation_params.t_max)
         updated_state = update(state, current_time, initial_params)
         history.append(updated_state)
         current_time, state = updated_state
+        iteration += 1
     save_results(history,initial_params) 
+
+def peak_finder(
+    input_pkl_file: str = "snapshot.pkl",
+    padding:int =100
+    ):
+    assert(padding%2==0)
+    with open(input_pkl_file, 'rb') as f:
+        history, params = pkl.load(f)
+    W = conservative_to_primitive(history[-1][1], params)
+    dx = params.grid_info.delta()
+    der_prof = (W[1:,:]-W[:-1,:])/(dx) 
+    rho_der= der_prof[:, PrimativeIndex.DENSITY.value]
+    rho_der_right_pad = np.insert(rho_der, rho_der.shape[0], np.full(padding, -np.inf))
+    rho_der_pad = np.insert(rho_der_right_pad, 0, np.full(padding, -np.inf))
+    mask = np.full(rho_der_pad.shape, True) 
+    for shift in range(-padding,padding+1):
+        if(shift==0):
+            continue
+        shifted_rho_der_pad = np.roll(rho_der_pad, shift)
+        new_mask = (rho_der_pad < shifted_rho_der_pad)
+        mask &= new_mask 
+    unpadded_mask = mask[padding:-padding]
+    support = params.grid_info.construct_grid_edges(0)[1:-1]
+    
+    fig, axes = plt.subplots(1, 1, figsize=(12, 10), sharex=True)
+
+    rho = W[:, PrimativeIndex.DENSITY.value]
+
+    axes.plot(params.grid_info.construct_grid_centers(0), rho)
+    #axes.plot(support, rho_der)
+    axes.set_ylabel(r"$\rho$")
+    axes.legend()
+    for pos in support[unpadded_mask]:
+        axes.axvline(x=pos, color='black', linestyle='--', linewidth=1)
+
+    plt.show()
+
+def plot_Mdot(
+    input_pkl_file: str = "snapshot.pkl"
+):
+    with open(input_pkl_file, 'rb') as f:
+        history, params = pkl.load(f)
+    t, profile = history[-1]
+    centers=  params.grid_info.construct_grid_centers(0)
+    # for time, profile in history:
+    #     M_dot_val = M_dot(profile, params)
+    #     print(M_dot_val)
+    #     t.append(time)
+    #     data.append(M_dot_val)
+    plt.scatter(centers, M_dot(profile, params))
+    plt.show()
+
+
 
 if __name__ == "__main__":
     CartesianSodProblem()
     plot_results()
+#    peak_finder()
+#    HarderSodProblem()
+#    plot_results()
 #    BondiAccretionProblem()
-#    plot_results(title="Bondi Accretion", xlabel="r")
+#    plot_Mdot()
+#    plot_results(title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
