@@ -37,16 +37,17 @@ class GridInfo:
         return 0.5*(grid_edges[1:]+grid_edges[:-1])
 
     def weights(self, coordinate_system:CoordinateChoice, weight_type: WeightType):
+        # Results will get broadcast to appropriate dimension
         match coordinate_system:
             case CoordinateChoice.SPHERICAL:
                 match weight_type:
                     case WeightType.CENTER:
-                        x = self.construct_grid_centers(0) # Assuming the r index is in slot 0 
+                        r = self.construct_grid_centers(0) # Assuming the r index is in slot 0 
                     case WeightType.EDGE:
-                        x = self.construct_grid_edges(0)
+                        r = self.construct_grid_edges(0)
                     case _:
                         raise Exception("Invalid weight type")
-                weights  = np.power(x, 2)
+                weights  = np.power(r, 2)
             case CoordinateChoice.CARTESIAN:
                 match weight_type:
                     case WeightType.CENTER:
@@ -60,11 +61,11 @@ class GridInfo:
                 raise Exception("Invalid coordinate_system")
         return weights
  
-    def weight_vector(self, U_cart: npt.ArrayLike, coordinate_system: CoordinateChoice, weight_type: WeightType):
+    def weight_system(self, U_cart: npt.ArrayLike, coordinate_system: CoordinateChoice, weight_type: WeightType):
         weights  = self.weights(coordinate_system, weight_type)
         return (weights * U_cart.T).T
 
-    def unweight_vector(self, U: npt.ArrayLike, coordinate_system: CoordinateChoice, weight_type: WeightType):
+    def unweight_system(self, U: npt.ArrayLike, coordinate_system: CoordinateChoice, weight_type: WeightType):
         weights  = self.weights(coordinate_system, weight_type)
         return (U.T/weights).T
 

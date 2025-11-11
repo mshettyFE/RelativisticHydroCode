@@ -1,49 +1,44 @@
 import numpy as np 
+from enum import Enum
 import numpy.typing as npt
 import pickle as pkl
-from HydroCore import *
-from Parameters import SimParams, InitialParameters
+from HydroCore import PrimitiveIndex, SimParams, SimulationState
 from UpdateSteps import SpatialUpdateType, SpatialUpdate,TimeUpdateType
-import GridInfo
+from  GridInfo import GridInfo, WeightType, CoordinateChoice
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
-        params: Parameters.InitialParameters,
+        sim_state: SimulationState,
         filename: str = "snapshot.pkl"
         ):
-    data = (history, params)
+    data = (history, sim_state)
     with open(filename, 'wb') as f:
         pkl.dump(data, f)
 
 def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                            rho_r:np.float64, v_r: np.float64, P_r:np.float64,
                            N_cells: np.int64 = 10000,
-                           t_max: np.float64 = 0.2) -> InitialParameters:
-    grid_info = GridInfo.GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
+                           t_max: np.float64 = 0.2) -> SimulationState:
+    grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
-    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, GridInfo.CoordinateChoice.CARTESIAN,
+    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, coordinate_system= CoordinateChoice.CARTESIAN,
                                   include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
+    assert(primitives.ndim==2)
     grid_centers = grid_info.construct_grid_centers(0)
     lower_half = grid_centers<0.5 
     upper_half = grid_centers>=0.5
-    primitives[lower_half, PrimativeIndex.DENSITY.value] = rho_l
-    primitives[lower_half, PrimativeIndex.VELOCITY.value] = v_l
-    primitives[lower_half, PrimativeIndex.PRESSURE.value] = P_l
-    primitives[upper_half, PrimativeIndex.DENSITY.value] = rho_r
-    primitives[upper_half, PrimativeIndex.VELOCITY.value] = v_r
-    primitives[upper_half, PrimativeIndex.PRESSURE.value] = P_r
-    initial_conds = primitive_to_conservative(primitives, simulation_params)
-    return InitialParameters(grid_info, simulation_params, bcm, initial_conds)
-
-def M_dot(U_profiles: npt.ArrayLike, params: InitialParameters):
-    r_center = params.grid_info.construct_grid_centers(0) 
-    W = conservative_to_primitive(U_profiles, params)
-    return W[:, PrimativeIndex.DENSITY.value]*W[:,PrimativeIndex.VELOCITY.value]*np.power(r_center,2)
+    primitives[lower_half, PrimitiveIndex.DENSITY.value] = rho_l
+    primitives[lower_half, PrimitiveIndex.PRESSURE.value] = P_l
+    primitives[lower_half, PrimitiveIndex.X_VELOCITY.value] = v_l
+    primitives[upper_half, PrimitiveIndex.DENSITY.value] = rho_r
+    primitives[upper_half, PrimitiveIndex.PRESSURE.value] = P_r
+    primitives[upper_half, PrimitiveIndex.X_VELOCITY.value] = v_r
+    return SimulationState(primitives, grid_info, bcm, simulation_params)
 
 def BondiAccretionInitialization(
         rho: np.float64,
@@ -51,59 +46,44 @@ def BondiAccretionInitialization(
         P: np.float64,
         N_cells: np.float64
     ):
-    grid_info = GridInfo.GridInfo(np.array([0.1]), np.array([10.1]), np.array([N_cells]))
+    grid_info = GridInfo(np.array([0.5]), np.array([10.15]), np.array([N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
-    simulation_params = SimParams(1.4, 0.2, 20.0,1.0, GridInfo.CoordinateChoice.SPHERICAL, 
+    simulation_params = SimParams(1.4, 0.2, 20.0,1.0, coordinate_system= CoordinateChoice.SPHERICAL, 
                                   include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
-    primitives[:, PrimativeIndex.DENSITY.value] = rho
-    primitives[:, PrimativeIndex.VELOCITY.value] = v
-    primitives[:, PrimativeIndex.PRESSURE.value] = P
-    initial_conds = primitive_to_conservative(primitives, simulation_params)
-    return InitialParameters(grid_info, simulation_params, bcm, initial_conds)
+    primitives[:, PrimitiveIndex.DENSITY.value] = rho
+    primitives[:, PrimitiveIndex.X_VELOCITY.value] = v
+    primitives[:, PrimitiveIndex.PRESSURE.value] = P
+    return SimulationState(primitives, grid_info, bcm, simulation_params)
 
-def CartesianSodProblem():
-    initial_params = SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2)
-    state = initial_params.initial_weighted_U
-    current_time = 0.0 
-    history = []
-    while(current_time < initial_params.simulation_params.t_max):
-        updated_state = update(state, current_time, initial_params)
-        history.append(updated_state)
-        current_time, state = updated_state
-    save_results(history,initial_params)
+class WhichTestProblem(Enum):
+    CARTESIAN_SOD=0 
+    HARDER_SOD=1 
+    BONDI_PROBLEM=2
 
-def HarderSodProblem():
-    initial_params = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, t_max=0.1)
-    state = initial_params.initial_weighted_U
-    current_time = 0.0 
-    history = []
-    iteration  = 0
-    while(current_time < initial_params.simulation_params.t_max):
-        updated_state = update(state, current_time, initial_params)
-        if(iteration%100==0):
-            #print(iteration, current_time, initial_params.simulation_params.t_max)
-            history.append(updated_state)
-        history.append(updated_state)
-        current_time, state = updated_state
-        iteration += 1
-    save_results(history,initial_params)
-
-def BondiAccretionProblem():
-    initial_params = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
-    state = initial_params.initial_weighted_U 
-    current_time = 0.0
+def runSim(which_sim: WhichTestProblem):
+    match which_sim:
+        case WhichTestProblem.CARTESIAN_SOD:
+            save_frequency = 1
+            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
+        case WhichTestProblem.HARDER_SOD:
+            state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, t_max=0.1)
+            save_frequency = 100
+        case WhichTestProblem.BONDI_PROBLEM:
+            state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
+            save_frequency = 1
+        case _:
+            raise Exception("Unimplemented test problem")
     history = []
     iteration = 0
-    while(current_time < initial_params.simulation_params.t_max):
-        #print(iteration, current_time, initial_params.simulation_params.t_max)
-        updated_state = update(state, current_time, initial_params)
-        history.append(updated_state)
-        current_time, state = updated_state
+    while(state_sim.current_time < state_sim.simulation_params.t_max):
+        t, state = state_sim.update()
+        if(iteration%save_frequency==0):
+            history.append( (t,state))
         iteration += 1
-    save_results(history,initial_params) 
+    save_results(history, state_sim)
 
 def peak_finder(
     input_pkl_file: str = "snapshot.pkl",
@@ -112,10 +92,11 @@ def peak_finder(
     assert(padding%2==0)
     with open(input_pkl_file, 'rb') as f:
         history, params = pkl.load(f)
-    W = conservative_to_primitive(history[-1][1], params)
+    U_cartesian = params.grid_info.unweight_vector(history[1][-1], params.simulation_params.coordinate_system, WeightType.CENTER)
+    W = params.conservative_to_primitive(  U_cartesian)
     dx = params.grid_info.delta()
     der_prof = (W[1:,:]-W[:-1,:])/(dx) 
-    rho_der= der_prof[:, PrimativeIndex.DENSITY.value]
+    rho_der= der_prof[:, PrimitiveIndex.DENSITY.value]
     rho_der_right_pad = np.insert(rho_der, rho_der.shape[0], np.full(padding, -np.inf))
     rho_der_pad = np.insert(rho_der_right_pad, 0, np.full(padding, -np.inf))
     mask = np.full(rho_der_pad.shape, True) 
@@ -129,12 +110,12 @@ def peak_finder(
     support = params.grid_info.construct_grid_edges(0)[1:-1]
     
 if __name__ == "__main__":
-   CartesianSodProblem()
-   Plotting.plot_results()
-#    peak_finder()
-#    HarderSodProblem()
-    # Plotting.plot_results("snapshot.pkl")
-    # BondiAccretionProblem()
-    # Plotting.plot_Mdot_time("snapshot.pkl")
-    # #Plotting.plot_Mdot_position("snapshot.pkl")
-    # Plotting.plot_results("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
+#     runSim(WhichTestProblem.CARTESIAN_SOD)
+#     Plotting.plot_results_1D()
+# #    peak_finder()
+#     runSim(WhichTestProblem.HARDER_SOD)
+#     Plotting.plot_results_1D()
+    runSim(WhichTestProblem.BONDI_PROBLEM)
+    Plotting.plot_Mdot_time("snapshot.pkl")
+    Plotting.plot_Mdot_position("snapshot.pkl")
+    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)

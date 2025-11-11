@@ -1,10 +1,9 @@
 import matplotlib.pyplot as plt
 import pickle as pkl
 import numpy as np
-from HydroCore import PrimativeIndex
-import HydroCore
+from HydroCore import PrimitiveIndex, SimulationState
 
-def plot_results(
+def plot_results_1D(
     input_pkl_file: str = "snapshot.pkl",
     filename: str = "sod_shock_evolution.png",
     title: str = "Sod Shock Tube Evolution (HLL Flux)",
@@ -16,9 +15,9 @@ def plot_results(
 # I said yes, but use the history list, save it to a png filename
 # I also cleaned up extraneous variables and the like
     with open(input_pkl_file, 'rb') as f:
-        history, params = pkl.load(f)
+        history, sim_state = pkl.load(f)
     N = history[0][1].shape[0]
-    support = params.grid_info.construct_grid_centers(0)
+    support = sim_state.grid_info.construct_grid_centers(0)
     assert(N==support.shape[0])
 
     if(show_mach):
@@ -27,12 +26,13 @@ def plot_results(
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
     t, U = history[-1]
-    W = HydroCore.conservative_to_primitive(U, params)
+    sim_state.U = U
+    W = sim_state.conservative_to_primitive(U)
 
-    rho = W[:, PrimativeIndex.DENSITY.value]
-    v = W[:, PrimativeIndex.VELOCITY.value]
-    P = W[:, PrimativeIndex.PRESSURE.value]
-    c_s = HydroCore.sound_speed(W, params)
+    rho = sim_state.index_primitive_var( W,PrimitiveIndex.DENSITY)
+    v = sim_state.index_primitive_var( W,PrimitiveIndex.X_VELOCITY)
+    P = sim_state.index_primitive_var( W,PrimitiveIndex.PRESSURE)
+    c_s = sim_state.sound_speed(W)
 
     label = f"t = {t:.3f}"
 
@@ -62,12 +62,14 @@ def plot_Mdot_time(
     input_pkl_file: str
 ):
     with open(input_pkl_file, 'rb') as f:
-        history, params = pkl.load(f)
-    centers=  params.grid_info.construct_grid_centers(0)
+        saved_state = pkl.load(f)
+    history = saved_state[0] 
+    sim_state: SimulationState = saved_state[1]
     t = [] 
     data = []
     for time, profile in history:
-        M_dot_val = HydroCore.M_dot(profile, params)[0]
+        sim_state.U = profile
+        M_dot_val = sim_state.M_dot()[0]
         t.append(time)
         data.append(np.abs(M_dot_val))
     plt.scatter(t, data) 
@@ -79,9 +81,10 @@ def plot_Mdot_position(
     input_pkl_file: str = "snapshot.pkl"
 ):
     with open(input_pkl_file, 'rb') as f:
-        history, params = pkl.load(f)
-    centers=  params.grid_info.construct_grid_centers(0)
-    plt.scatter(centers, HydroCore.M_dot(history[-1][1], params) )
+        history, sim_state= pkl.load(f)
+    centers=  sim_state.grid_info.construct_grid_centers(0)
+    sim_state.U = history[-1][1]
+    plt.scatter(centers, sim_state.M_dot() )
     plt.xlabel("R")
     plt.ylabel("$M_{dot}$")
     plt.show()
