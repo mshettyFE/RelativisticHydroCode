@@ -1,6 +1,8 @@
 import numpy.typing as npt
 from enum import Enum
 import numpy as np
+from numpy.lib._index_tricks_impl import ndindex
+from numpy.lib._arraypad_impl import _as_pairs
 import sys
 import copy
 from dataclasses import dataclass
@@ -32,23 +34,47 @@ class SimParams:
     time_integration: TimeUpdateType 
     spatial_integration: SpatialUpdate
 
-def boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:int , kwargs: dict):
+def initial_value_boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:int , kwargs: dict):
     # Following Note from: https://numpy.org/devdocs/reference/generated/numpy.pad.html
     # vector is a 1D array that is already padded 
     # iaxis_pad_width denotes how many elements of each size are the padded elements  
     #   So the padded portions are vector[:iaxis_pad_width[0]] and vector[-iaxis_pad_width[1]:]
     # iaxis denotes which axis this vector is associated with 
-    # kwargs is of the form {"simstate": SimulationState, "initial_state", unweighted_initial}
-    # passing self of SimulationState with a dummy key is to conform to the numpy API. "initial_state" is so that you don't recalculate the unweighting of the initial every padding operation 
-    sim_state = kwargs.get("sim_state",None) 
-    assert(sim_state != None)
-    unweighted_initial=kwargs.get("unweighted_initial", None)
-    assert(unweighted_initial != None)
-    left_bc, right_bc = sim_state.bcm.get_boundary_conds(iaxis)
+    # kwargs is an empty dictionary
+    # Propagate the original edge values to their respective edges
+    vector[:iaxis_pad_width[0]] = vector[iaxis_pad_width[0]]
+    if(iaxis_pad_width[1]!=0):
+        vector[-iaxis_pad_width[1]:] = vector[-iaxis_pad_width[1]-1]
+
+def boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:int , 
+                     initial_boundary: npt.NDArray, left_bc: BoundaryCondition, right_bc: BoundaryCondition):
+    # Following Note from: https://numpy.org/devdocs/reference/generated/numpy.pad.html
+    # vector is a 1D array that is already padded 
+    # iaxis_pad_width denotes how many elements of each size are the padded elements  
+    #   So the padded portions are vector[:iaxis_pad_width[0]] and vector[-iaxis_pad_width[1]:]
+    # iaxis denotes which axis this vector is associated with 
+    # kwargs is an empty dictionary
+    match left_bc:
+        case BoundaryCondition.ZERO_GRAD:
+            vector[:iaxis_pad_width[0]] = vector[iaxis_pad_width[0]]
+        case BoundaryCondition.FIXED:
+            vector[:iaxis_pad_width[0]] = initial_boundary[iaxis_pad_width[0]]
+        case _:
+            raise Exception("Unimplemented BC")
+    match right_bc:
+        case BoundaryCondition.ZERO_GRAD:
+            if(iaxis_pad_width[1]!=0):
+                vector[-iaxis_pad_width[1]:] = vector[-iaxis_pad_width[1]-1]
+        case BoundaryCondition.FIXED:
+            if(iaxis_pad_width[1]!=0):  
+                vector[-iaxis_pad_width[1]:] = initial_boundary[-iaxis_pad_width[1]-1]
+        case _:
+            raise Exception("Unimplemented BC")
+
 
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
-    U_initial: npt.ArrayLike # Initial conditions of the sim. Used for boundary conditions
+    U_initial_unweighted_padded: npt.ArrayLike # Initial conditions of the sim. Used for boundary conditions
     grid_info: GridInfo
     bcm: BoundaryConditionManager
     spatial_dimensions: np.int64 # Number of spatial dimensions in consideration
@@ -66,8 +92,12 @@ class SimulationState:
         self.simulation_params = sim_params
         self.grid_info = a_grid_info 
         self.bcm = a_bcm
-        self.U_initial = self.grid_info.weight_system(  self.primitive_to_conservative(primitive_tensor), sim_params.coordinate_system, WeightType.CENTER)  
-        self.U = copy.deepcopy(self.U_initial)
+        U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
+        padding = self.simulation_params.spatial_integration.pad_width()
+        # Make sure that the last index gets skipped, since that's associated with the variables
+        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1) + [(0,0)]
+        self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
+        self.U = self.grid_info.weight_system(U_unweighted_initial, sim_params.coordinate_system, WeightType.CENTER)
         self.current_time = starting_time
 
     def index_conservative_var(self, U_cart: npt.ArrayLike, var_type: ConservativeIndex): 
@@ -188,47 +218,55 @@ class SimulationState:
         W = self.conservative_to_primitive(unweighted_U)
         return self.index_primitive_var(W, PrimitiveIndex.DENSITY)*self.index_primitive_var(W,PrimitiveIndex.X_VELOCITY)*np.power(r_center,2)
  
-    def pad_unweighted_array(self, var:npt.ArrayLike, pad_width=1):
+    def pad_unweighted_array(self, var:npt.ArrayLike):
         # Augment the array to incorporate the BCs
         # Input array is Cartesian (unweighted)
         # Returns the padded, Cartesian array 
-        # Unweight the initial weighted array. Kind of wasteful, but it's fine...
-        var_initial = self.grid_info.unweight_system(self.U_initial, self.simulation_params.coordinate_system, WeightType.CENTER) 
-        spatial_index = 0
-        n_cells = self.grid_info.NCells[spatial_index]
-        #pad_widths = [(pad_width,pad_width)]* n_cells
-        #kwargs = {"simstate": self, "initial_state": var_initial}
-         # # Idea: Do the padding on an individual variable scale, then stack the (n-1) arrays together
-        # padded_sub_tensor_list = []
-        # for variable_index in range(var.shape[-1]):
-        #     sub_var = var[...,variable_index]
-        #     padded_sub_tensor_list.append( np.pad(var, pad_widths,boundary_padding, sim_state=self, unweighted_initial=  ))
-        # return np.stack(padded_sub_tensor_list, axis=1)
-        zero_index_row = np.tile(var[0,:], (1,1)) 
-        last_index_row  = np.tile(var[-1,:], (1,1))
-        zero_index_row_initial = np.tile(var_initial[0,:], (1,1)) 
-        last_index_row_initial  = np.tile(var_initial[-1,:], (1,1))
-        left_bc, right_bc = self.bcm.get_boundary_conds(spatial_index)
-        match right_bc:
-            case BoundaryCondition.ZERO_GRAD:
-                var_right_pad = np.insert(var, var.shape[0],last_index_row , axis=0)
-            case BoundaryCondition.FIXED:
-                var_right_pad = np.insert(var, var.shape[0],last_index_row_initial, axis=0)
-            case _:
-                raise Exception("Unimplemented BC")
-        match left_bc:
-            case BoundaryCondition.ZERO_GRAD:
-                var_padded  = np.insert(var_right_pad, 0, zero_index_row, axis=0) 
-            case BoundaryCondition.FIXED:
-                var_padded  = np.insert(var_right_pad, 0, zero_index_row_initial, axis=0) 
-            case _:
-                raise Exception("Unimplemented BC")
-        return var_padded    
+        # Based on https://github.com/numpy/numpy/blob/main/numpy/lib/_arraypad_impl.py#L546-L926
+        # Can't just use default np.pad since function signature of custom function for np.pad is not conducive for the FIXED boundary condition
+
+        # Define padding for each axis
+        padding = self.simulation_params.spatial_integration.pad_width()
+        # Make sure that the last index gets skipped, since that's associated with the variables
+        og_pad_width = [(padding,padding)]*(var.ndim-1) + [(0,0)]
+
+        pad_width = np.asarray(og_pad_width)
+
+        if not pad_width.dtype.kind == 'i':
+            raise TypeError('`pad_width` must be of integral type.')
+
+        # Broadcast to shape (array.ndim, 2)
+        # Probably shouldn't be using internal numpy function calls, but it is what it is...
+        pad_width = _as_pairs(pad_width, var.ndim, as_index=True)
+
+        padded = np.pad(var, pad_width)
+        assert(self.U_initial_unweighted_padded.shape == padded.shape)
+        # And apply along each axis
+
+        for axis in range(0,padded.ndim):
+            # Iterate using ndindex as in apply_along_axis, but assuming that
+            # function operates inplace on the padded array.
+
+            # view with the iteration axis at the end
+            view = np.moveaxis(padded, axis, -1)
+            initial_view = np.moveaxis(self.U_initial_unweighted_padded,axis, -1)
+
+            # compute indices for the iteration axes, and append a trailing
+            # ellipsis to prevent 0d arrays decaying to scalars (gh-8642)
+            inds = ndindex(view.shape[:-1])
+            inds = (ind + (Ellipsis,) for ind in inds)
+            if(axis !=  len(og_pad_width)-1):
+                # Grab the B/Cs for this particular dimension
+                left_bc, right_bc = self.bcm.get_boundary_conds(axis)
+                for ind in inds:
+                    boundary_padding(view[ind], pad_width[axis], axis, initial_view[ind], left_bc, right_bc)
+        return padded
 
     def LinearUpdate(self, U_cart: npt.ArrayLike): 
+        pad_width = self.simulation_params.spatial_integration.pad_width()
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
-                U_padded_cart = self.pad_unweighted_array(U_cart, 1)
+                U_padded_cart = self.pad_unweighted_array(U_cart)
                 flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart, 0)
                 dt = self.calc_dt(alpha_plus, alpha_minus)
                 state_update = flux_change

@@ -69,7 +69,7 @@ def runSim(which_sim: WhichTestProblem):
             save_frequency = 1
             state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
         case WhichTestProblem.HARDER_SOD:
-            state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, t_max=0.1)
+            state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
         case WhichTestProblem.BONDI_PROBLEM:
             state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
@@ -83,6 +83,7 @@ def runSim(which_sim: WhichTestProblem):
         if(iteration%save_frequency==0):
             history.append( (t,state))
         iteration += 1
+        print(t, state_sim.simulation_params.t_max)
     save_results(history, state_sim)
 
 def peak_finder(
@@ -111,10 +112,10 @@ def peak_finder(
     
 if __name__ == "__main__":
 #     runSim(WhichTestProblem.CARTESIAN_SOD)
-#     Plotting.plot_results_1D()
-# #    peak_finder()
-#     runSim(WhichTestProblem.HARDER_SOD)
-#     Plotting.plot_results_1D()
+#    Plotting.plot_results_1D()
+#    peak_finder()
+#    runSim(WhichTestProblem.HARDER_SOD)
+#    Plotting.plot_results_1D()
     runSim(WhichTestProblem.BONDI_PROBLEM)
     Plotting.plot_Mdot_time("snapshot.pkl")
     Plotting.plot_Mdot_position("snapshot.pkl")

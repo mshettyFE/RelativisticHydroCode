@@ -1,5 +1,4 @@
 from enum import Enum
-from dataclasses import dataclass
 import numpy as np
 
 class TimeUpdateType(Enum):
@@ -10,11 +9,24 @@ class SpatialUpdateType(Enum):
     FLAT = 0 
     PLM = 1
 
-@dataclass
 class SpatialUpdate:
     method: SpatialUpdateType 
     params: dict[str, np.float64]
 
+    def __init__(self, a_method, a_params):
+        self.method = a_method
+        self.params = a_params
 
+    def pad_width(self) -> int:
+        pad_width = None 
+        match self.method:
+            case SpatialUpdateType.FLAT:
+                pad_width = 1
+            case SpatialUpdateType.PLM:
+                pad_width = 2
+            case _:
+                raise Exception("Invalid spatial integration type. Can't assign pad width")
+        return pad_width
+ 
 if __name__=="__main__":
     pass

@@ -16,7 +16,7 @@ class BoundaryConditionManager:
         self.left_bcs = left_boundaries 
         self.right_bcs = right_boundaries 
 
-    def get_boundary_conds(self, index: int):
+    def get_boundary_conds(self, index: int) -> tuple[BoundaryCondition,BoundaryCondition]:
         assert( (index>=0) and (index < len(self.left_bcs)))
         return (self.left_bcs[index], self.right_bcs[index])
 
