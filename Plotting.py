@@ -89,6 +89,17 @@ def plot_Mdot_position(
     plt.ylabel("$M_{dot}$")
     plt.show()
 
+def plot_2D(
+    input_pkl_file: str = "snapshot.pkl"   
+        ):
+    with open(input_pkl_file, 'rb') as f:
+        history, sim_state = pkl.load(f)
+    grid_centers_x = sim_state.grid_info.construct_grid_centers(0)
+    grid_centers_y = sim_state.grid_info.construct_grid_centers(1)
+    xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
+    plt.contour(xx,yy, sim_state.U[...,0])
+    plt.show()
+
 
 
 if __name__ =="__main__":

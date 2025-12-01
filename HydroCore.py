@@ -131,15 +131,21 @@ class SimulationState:
                 x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
                 E = rho * self.internal_energy_primitive(W) + 0.5*rho*np.power(x_velocity,2)
                 return np.stack([rho, E, rho*x_velocity], axis= 1) 
+            case 2:
+                rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+                x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
+                y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
+                E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2))
+                return np.stack([rho, E, rho*x_velocity, rho*y_velocity], axis=2)
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
     def internal_energy_primitive(self,W: npt.ArrayLike) -> npt.NDArray[np.float64]:
         match self.spatial_dimensions:
-            case 1:
+            case 1 | 2:
                 pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
                 density = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
-                return pressure /( (self.simulation_params.gamma-1) * density) 
+                return pressure /( (self.simulation_params.gamma-1) * density)  
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
@@ -150,15 +156,25 @@ class SimulationState:
                 pressure = self.equation_of_state_conservative(U_cart)
                 assert(np.all(rho!=0))
                 return np.stack([rho,  pressure, self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)/ rho], axis=1) 
+            case 2:
+                rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
+                pressure = self.equation_of_state_conservative(U_cart)
+                assert(np.all(rho!=0))
+                return np.stack([rho,  pressure, 
+                    self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)/ rho,
+                    self.index_conservative_var(U_cart, ConservativeIndex.Y_MOMENTUM_DENSITY)/ rho], axis=2) 
+            case _:
+                raise Exception("Unimplemented simulation dimension")
 
     def equation_of_state_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
         match self.spatial_dimensions:
-            case 1:
+            case 1 | 2:
                 e = np.clip(self.internal_energy_conservative(U_cart), a_min=1E-9, a_max=None)
                 assert np.all(e>=0)
                 return (self.simulation_params.gamma-1)*self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)*e
             case _:
                 raise Exception("Unimplemented simulation dimension")
+
     def internal_energy_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
         match self.spatial_dimensions:
             case 1:
@@ -172,10 +188,21 @@ class SimulationState:
                 #  E/rho-0.5 v**2 = e
                 e = E/rho-0.5*np.power(v,2)
                 return e
+            case 2:
+                rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
+                assert(np.all(rho!=0))
+                v_x = self.index_conservative_var( U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)/rho
+                v_y = self.index_conservative_var( U_cart, ConservativeIndex.Y_MOMENTUM_DENSITY)/rho
+                E = self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)
+                # Total energy
+                #   E = \rho *e + 0.5*\rho * (v_x**2+v_y**2)
+                # Inverting to isolate e 
+                e = E/rho-0.5*(np.power(v_x,2) + np.power(v_y,2))
+                return e 
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
-    def flux_from_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
+    def flux_from_conservative(self, U_cart: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
         match self.spatial_dimensions:
             case 1:
                 # F = (\rho v, \rho v^2 +P, (E+P) v)
@@ -184,11 +211,34 @@ class SimulationState:
                 F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
                 F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
                 return np.stack([F_0,F_1,F_2], axis=1)
+            case 2:
+                match spatial_index:
+                    case  0: # x flux
+                        # F = (\rho v_x, (E+P) v_x, \rho v_x^2 +P, \rho v_x v_y)
+                        primitive = self.conservative_to_primitive(U_cart)
+                        F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
+                        F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
+                        F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
+                        F_3 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)
+                        return np.stack([F_0,F_1,F_2,F_3], axis=2)
+                    case 1: # y flux
+                        # G = (\rho v_y, (E+P) v_y, \rho v_y^2 +P, \rho v_x v_y)
+                        primitive = self.conservative_to_primitive(U_cart)
+                        G_0 = self.index_conservative_var(U_cart, ConservativeIndex.Y_MOMENTUM_DENSITY)
+                        G_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.Y_VELOCITY)
+                        G_2 = G_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
+                        G_3 = G_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)
+                        return np.stack([G_0,G_1,G_2,G_3], axis=2)
+                    case _:
+                        raise Exception("Invalid flux direction")
+                
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
     def sound_speed(self, W: npt.ArrayLike):
-        return np.sqrt(self.simulation_params.gamma* self.index_primitive_var(W, PrimitiveIndex.PRESSURE)/ self.index_primitive_var(W, PrimitiveIndex.DENSITY))
+        pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
+        density = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        return np.sqrt(self.simulation_params.gamma* pressure / density)
 
     def update(self) -> tuple[np.float64, npt.NDArray]:
         # Undo scaling for input
@@ -263,13 +313,16 @@ class SimulationState:
         return padded
 
     def LinearUpdate(self, U_cart: npt.ArrayLike): 
-        pad_width = self.simulation_params.spatial_integration.pad_width()
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
                 U_padded_cart = self.pad_unweighted_array(U_cart)
-                flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart, 0)
-                dt = self.calc_dt(alpha_plus, alpha_minus)
-                state_update = flux_change
+                possible_dt = []
+                state_update = np.zeros(U_cart.shape)
+                for dim in range(self.spatial_dimensions):
+                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart, dim)
+                    possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
+                    state_update += flux_change
+                dt = max(possible_dt)
                 if(self.simulation_params.include_source):
                     state_update += self.SourceTerm(U_padded_cart[1:-1])
                 return dt, state_update
@@ -278,24 +331,41 @@ class SimulationState:
 
     def spatial_derivative(self, U_padded_cart: npt.ArrayLike, spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
         # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        cell_flux = self.flux_from_conservative(U_padded_cart)
+        cell_flux = self.flux_from_conservative(U_padded_cart, spatial_index)
         alpha_minus, alpha_plus = self.alpha_plus_minus(U_padded_cart)
         alpha_sum = alpha_minus+alpha_plus 
         assert(np.all(alpha_sum != 0))
         alpha_prod = alpha_minus*alpha_plus
-        # Augment flux array as well with 0 flux conditions 
         # Bunch of .T because numpy broadcasting rules
-        left_cell_flux = cell_flux[1:-1,:].T 
-        left_conserve = U_padded_cart[1:-1,:].T
-        right_cell_flux =cell_flux[2:,:].T  
-        right_conserve = U_padded_cart[2:,:].T
-        cell_flux_plus_half = (alpha_plus*left_cell_flux+ alpha_minus*right_cell_flux-alpha_prod*(right_conserve-left_conserve))/alpha_sum 
-        # Now the minus branch
-        left_cell_flux = cell_flux[:-2,:].T 
-        left_conserve = U_padded_cart[:-2,:].T
-        right_cell_flux =cell_flux[1:-1,:].T  
-        right_conserve = U_padded_cart[1:-1,:].T
-        cell_flux_minus_half = (alpha_plus*left_cell_flux+ alpha_minus*right_cell_flux-alpha_prod*(right_conserve-left_conserve))/alpha_sum 
+        match U_padded_cart.ndim-1:
+            case 1:
+                # Now the plus branch
+                left_cell_flux_plus = cell_flux[1:-1,:].T 
+                left_conserve_plus = U_padded_cart[1:-1,:].T
+                right_cell_flux_plus =cell_flux[2:,:].T  
+                right_conserve_plus = U_padded_cart[2:,:].T
+                # Now the minus branch
+                left_cell_flux_minus = cell_flux[:-2,:].T 
+                left_conserve_minus = U_padded_cart[:-2,:].T
+                right_cell_flux_minus =cell_flux[1:-1,:].T  
+                right_conserve_minus = U_padded_cart[1:-1,:].T
+            case 2:
+                # Now the plus branch
+                left_cell_flux_plus = cell_flux[1:-1,1:-1,:].T 
+                left_conserve_plus = U_padded_cart[1:-1,1:-1,:].T
+                right_cell_flux_plus =cell_flux[2:,2:,:].T  
+                right_conserve_plus = U_padded_cart[2:,2:,:].T
+                # Now the minus branch
+                left_cell_flux_minus = cell_flux[:-2,:-2,:].T 
+                left_conserve_minus = U_padded_cart[:-2,:-2,:].T
+                right_cell_flux_minus =cell_flux[1:-1,1:-1,:].T  
+                right_conserve_minus = U_padded_cart[1:-1,1:-1,:].T
+            case _:
+                raise Exception("Unimplemented spatial dimension")
+        cell_flux_plus_half = (alpha_plus*left_cell_flux_plus+ alpha_minus*right_cell_flux_plus
+                               -alpha_prod*(right_conserve_plus -left_conserve_plus))/alpha_sum 
+        cell_flux_minus_half = (alpha_plus*left_cell_flux_minus+ alpha_minus*right_cell_flux_minus
+                                -alpha_prod*(right_conserve_minus-left_conserve_minus))/alpha_sum 
         weights = self.grid_info.weights(self.simulation_params.coordinate_system, WeightType.EDGE) 
         cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:]
         cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1]
@@ -305,21 +375,31 @@ class SimulationState:
         U = U_padded_cart
         primitives = self.conservative_to_primitive(U)
         c_s = self.sound_speed(primitives)
-        lambda_plus = primitives[:,PrimitiveIndex.X_VELOCITY.value]+c_s
-        lambda_minus = primitives[:,PrimitiveIndex.X_VELOCITY.value]-c_s
+        lambda_plus = primitives[...,PrimitiveIndex.X_VELOCITY.value]+c_s
+        lambda_minus = primitives[...,PrimitiveIndex.X_VELOCITY.value]-c_s
         # We have two lists of sounds speeds in the left and right cells. Do MAX(0, left, right) for + and MAX(0,-left, -right) for - 
-        zeros = np.zeros(lambda_plus.shape[0]-2)
-        # First, the plus case   
+        zeros_shape = [dim-2 for dim in lambda_plus.shape]
+        zeros = np.zeros(zeros_shape)
         # Grab the left and right speeds from the padded array
-        alpha_plus_candidates = np.stack([zeros, lambda_plus[:-2], lambda_plus[2:]], axis=1)    
+        match zeros.ndim:
+            case 1:
+                lambda_plus_left = lambda_plus[:-2]
+                lambda_plus_right = lambda_plus[2:]
+                lambda_minus_left = lambda_minus[:-2]
+                lambda_minus_right = lambda_minus[2:]
+            case 2:
+                lambda_plus_left = lambda_plus[:-2,:-2]
+                lambda_plus_right = lambda_plus[2:, 2:]
+                lambda_minus_left = lambda_minus[:-2, :-2]
+                lambda_minus_right = lambda_minus[2:, 2:]
+            case 3:
+                raise Exception("Unimplemented dimension")
+        # First, the plus case   
+        alpha_plus_candidates = np.stack([zeros, lambda_plus_left, lambda_plus_right], axis=zeros.ndim)    
         # Calculate max across each row
-        alpha_plus = np.max(alpha_plus_candidates, axis=1)
-        # Dont forget the minus sign prefactors here! (GPT caught this...) 
-        # Prompt: Pasted in source file and stated that internal energy was going negative after 1 timestep; please point out potential errors 
-        # It gave me some B.S. about Rusanov flux (which I'm not implementing) and incorrect signage of time update (which is wrong)
-        # It did catch the sign error though (which I forgot to add after reading the hydro PDF)
-        alpha_minus_candidates = np.stack([zeros, -lambda_minus[:-2], -lambda_minus[2:]], axis=1)    
-        alpha_minus = np.max(alpha_minus_candidates, axis=1)
+        alpha_plus = np.max(alpha_plus_candidates, axis=zeros.ndim)
+        alpha_minus_candidates = np.stack([zeros, -lambda_minus_left, -lambda_minus_right], axis=zeros.ndim)    
+        alpha_minus = np.max(alpha_minus_candidates, axis=zeros.ndim)
         return (alpha_minus, alpha_plus)
 
     def SourceTerm(self,U_cart_unpadded:npt.ArrayLike):

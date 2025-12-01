@@ -7,6 +7,7 @@ from UpdateSteps import SpatialUpdateType, SpatialUpdate,TimeUpdateType
 from  GridInfo import GridInfo, WeightType, CoordinateChoice
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
+from matplotlib import pyplot as plt
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
@@ -58,21 +59,63 @@ def BondiAccretionInitialization(
     primitives[:, PrimitiveIndex.PRESSURE.value] = P
     return SimulationState(primitives, grid_info, bcm, simulation_params)
 
-class WhichTestProblem(Enum):
+class Which1DTestProblem(Enum):
     CARTESIAN_SOD=0 
     HARDER_SOD=1 
     BONDI_PROBLEM=2
 
-def runSim(which_sim: WhichTestProblem):
+def runSim1D(which_sim: Which1DTestProblem):
     match which_sim:
-        case WhichTestProblem.CARTESIAN_SOD:
+        case Which1DTestProblem.CARTESIAN_SOD:
             save_frequency = 1
             state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
-        case WhichTestProblem.HARDER_SOD:
+        case Which1DTestProblem.HARDER_SOD:
             state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
-        case WhichTestProblem.BONDI_PROBLEM:
+        case Which1DTestProblem.BONDI_PROBLEM:
             state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
+            save_frequency = 1
+        case _:
+            raise Exception("Unimplemented test problem")
+    history = []
+    iteration = 0
+    while(state_sim.current_time < state_sim.simulation_params.t_max):
+        t, state = state_sim.update()
+        if(iteration%save_frequency==0):
+            history.append( (t,state))
+        iteration += 1
+    save_results(history, state_sim)
+
+def ImplosionInitialization(t_max = 2.5, N_cells = 100):
+    grid_info = GridInfo(np.array([0.0,0.0]), np.array([0.3,0.3]), np.array([N_cells,N_cells]))
+    spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
+    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, coordinate_system= CoordinateChoice.CARTESIAN,
+                                  include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
+    bcm = BoundaryConditionManager(
+            [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD], 
+            [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD]
+            )
+    grid_shape = grid_info.NCells
+    primitives = np.zeros( list(grid_shape)+[4]  ) 
+    grid_centers_x = grid_info.construct_grid_centers(0)
+    grid_centers_y = grid_info.construct_grid_centers(1)
+    xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
+    summed = xx+yy
+    lower = summed < 0.15
+    upper = summed >= 0.15 
+    primitives[lower, PrimitiveIndex.DENSITY.value] = 0.125
+    primitives[lower, PrimitiveIndex.PRESSURE.value] = 0.125
+    primitives[upper, PrimitiveIndex.DENSITY.value] = 1.0
+    primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
+    return SimulationState(primitives, grid_info, bcm, simulation_params)
+
+class Which2DTestProblem:
+    IMPLOSION_TEST=0
+
+def runSim2D(which_sim: Which2DTestProblem):
+    match which_sim:
+        case Which2DTestProblem.IMPLOSION_TEST:
+            state_sim = ImplosionInitialization()            
             save_frequency = 1
         case _:
             raise Exception("Unimplemented test problem")
@@ -85,38 +128,15 @@ def runSim(which_sim: WhichTestProblem):
         iteration += 1
         print(t, state_sim.simulation_params.t_max)
     save_results(history, state_sim)
-
-def peak_finder(
-    input_pkl_file: str = "snapshot.pkl",
-    padding:int =100
-    ):
-    assert(padding%2==0)
-    with open(input_pkl_file, 'rb') as f:
-        history, params = pkl.load(f)
-    U_cartesian = params.grid_info.unweight_vector(history[1][-1], params.simulation_params.coordinate_system, WeightType.CENTER)
-    W = params.conservative_to_primitive(  U_cartesian)
-    dx = params.grid_info.delta()
-    der_prof = (W[1:,:]-W[:-1,:])/(dx) 
-    rho_der= der_prof[:, PrimitiveIndex.DENSITY.value]
-    rho_der_right_pad = np.insert(rho_der, rho_der.shape[0], np.full(padding, -np.inf))
-    rho_der_pad = np.insert(rho_der_right_pad, 0, np.full(padding, -np.inf))
-    mask = np.full(rho_der_pad.shape, True) 
-    for shift in range(-padding,padding+1):
-        if(shift==0):
-            continue
-        shifted_rho_der_pad = np.roll(rho_der_pad, shift)
-        new_mask = (rho_der_pad < shifted_rho_der_pad)
-        mask &= new_mask 
-    unpadded_mask = mask[padding:-padding]
-    support = params.grid_info.construct_grid_edges(0)[1:-1]
-    
+   
 if __name__ == "__main__":
-#     runSim(WhichTestProblem.CARTESIAN_SOD)
+#    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
 #    Plotting.plot_results_1D()
-#    peak_finder()
-#    runSim(WhichTestProblem.HARDER_SOD)
+#    runSim1D(Which1DTestProblem.HARDER_SOD)
 #    Plotting.plot_results_1D()
-    runSim(WhichTestProblem.BONDI_PROBLEM)
-    Plotting.plot_Mdot_time("snapshot.pkl")
-    Plotting.plot_Mdot_position("snapshot.pkl")
-    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
+    # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
+    # Plotting.plot_Mdot_time("snapshot.pkl")
+    # Plotting.plot_Mdot_position("snapshot.pkl")
+    # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
+    #runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+    Plotting.plot_2D()
