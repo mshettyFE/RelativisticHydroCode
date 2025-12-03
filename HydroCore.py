@@ -3,8 +3,6 @@ from enum import Enum
 import numpy as np
 from numpy.lib._index_tricks_impl import ndindex
 from numpy.lib._arraypad_impl import _as_pairs
-import sys
-import copy
 from dataclasses import dataclass
 from BoundaryManager import BoundaryCondition 
 from GridInfo import GridInfo, CoordinateChoice, WeightType
@@ -77,18 +75,18 @@ class SimulationState:
     U_initial_unweighted_padded: npt.ArrayLike # Initial conditions of the sim. Used for boundary conditions
     grid_info: GridInfo
     bcm: BoundaryConditionManager
-    spatial_dimensions: np.int64 # Number of spatial dimensions in consideration
+    n_variable_dimensions: np.int64 # Number of spatial dimensions in consideration
     simulation_params: SimParams
     current_time: np.float64 = 0.0
 
     def __init__(self, primitive_tensor: npt.NDArray, a_grid_info: GridInfo, a_bcm: BoundaryConditionManager, sim_params: SimParams, starting_time: np.float64 = 0):
-        spatial_dimensions = a_grid_info.NCells.shape[0]
-        assert(spatial_dimensions == len(a_bcm.left_bcs))
-        self.spatial_dimensions = spatial_dimensions 
-        assert(primitive_tensor.ndim == (spatial_dimensions+1)) # +1 from the variable index
+        n_variable_dimensions = a_grid_info.NCells.shape[0]
+        assert(n_variable_dimensions == len(a_bcm.left_bcs))
+        self.n_variable_dimensions = n_variable_dimensions 
+        assert(primitive_tensor.ndim == (n_variable_dimensions+1)) # +1 from the variable index
         n_variables = primitive_tensor.shape[-1] # Assuming that variables are the last index 
         assert(n_variables >=3) # Need density, at least 1 velocity, and pressure 
-        assert(n_variables-2==spatial_dimensions) # Number of velocities should equal the spatial dimension
+        assert(n_variables-2==n_variable_dimensions) # Number of velocities should equal the spatial dimension
         self.simulation_params = sim_params
         self.grid_info = a_grid_info 
         self.bcm = a_bcm
@@ -101,7 +99,7 @@ class SimulationState:
         self.current_time = starting_time
 
     def index_conservative_var(self, U_cart: npt.ArrayLike, var_type: ConservativeIndex): 
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 max_allowed_index = ConservativeIndex.X_MOMENTUM_DENSITY
             case 2:
@@ -113,7 +111,7 @@ class SimulationState:
         raise Exception("Trying to index momentum that is larger than the imension of the problem") 
 
     def index_primitive_var(self, primitive: npt.NDArray, var_type: PrimitiveIndex):
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 max_allowed_index = PrimitiveIndex.X_VELOCITY
             case 2:
@@ -125,23 +123,23 @@ class SimulationState:
         raise Exception("Trying to index momentum that is larger than the imension of the problem")
 
     def primitive_to_conservative(self, W: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
                 x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
                 E = rho * self.internal_energy_primitive(W) + 0.5*rho*np.power(x_velocity,2)
-                return np.stack([rho, E, rho*x_velocity], axis= 1) 
+                return np.stack([rho, E, rho*x_velocity], axis= self.n_variable_dimensions) 
             case 2:
                 rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
                 x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
                 y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
                 E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2))
-                return np.stack([rho, E, rho*x_velocity, rho*y_velocity], axis=2)
+                return np.stack([rho, E, rho*x_velocity, rho*y_velocity], axis=self.n_variable_dimensions)
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
     def internal_energy_primitive(self,W: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1 | 2:
                 pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
                 density = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
@@ -150,7 +148,7 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def conservative_to_primitive(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
                 pressure = self.equation_of_state_conservative(U_cart)
@@ -167,7 +165,7 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def equation_of_state_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1 | 2:
                 e = np.clip(self.internal_energy_conservative(U_cart), a_min=1E-9, a_max=None)
                 assert np.all(e>=0)
@@ -176,7 +174,7 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def internal_energy_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
                 assert(np.all(rho!=0))
@@ -203,7 +201,7 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def flux_from_conservative(self, U_cart: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
-        match self.spatial_dimensions:
+        match self.n_variable_dimensions:
             case 1:
                 # F = (\rho v, \rho v^2 +P, (E+P) v)
                 primitive = self.conservative_to_primitive(U_cart)
@@ -318,7 +316,7 @@ class SimulationState:
                 U_padded_cart = self.pad_unweighted_array(U_cart)
                 possible_dt = []
                 state_update = np.zeros(U_cart.shape)
-                for dim in range(self.spatial_dimensions):
+                for dim in range(self.n_variable_dimensions):
                     flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart, dim)
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change

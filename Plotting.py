@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import pickle as pkl
 import numpy as np
+from matplotlib.animation import FuncAnimation
 from HydroCore import PrimitiveIndex, SimulationState
 
 def plot_results_1D(
@@ -89,18 +90,35 @@ def plot_Mdot_position(
     plt.ylabel("$M_{dot}$")
     plt.show()
 
-def plot_2D(
+def plot_2D_anim(
     input_pkl_file: str = "snapshot.pkl"   
         ):
     with open(input_pkl_file, 'rb') as f:
-        history, sim_state = pkl.load(f)
-    grid_centers_x = sim_state.grid_info.construct_grid_centers(0)
-    grid_centers_y = sim_state.grid_info.construct_grid_centers(1)
+        data, last_state = pkl.load(f)
+ 
+    fig, ax = plt.subplots()
+
+    # Initialize image using the first array
+    t0, Z0 = data[0]
+    vmin = 0.2
+    vmax = 1.5 
+    grid_centers_x = last_state.grid_info.construct_grid_centers(0)
+    grid_centers_y = last_state.grid_info.construct_grid_centers(1)
     xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
-    plt.contour(xx,yy, sim_state.U[...,0])
+    quad = ax.pcolormesh(xx, yy, Z0[...,0], shading='auto', vmin=vmin, vmax=vmax, cmap='viridis')
+    fig.colorbar(quad, ax=ax)
+    ax.set_title(f"t = {data[0][0]:.3f}")
+
+    def update(frame):
+        t, arr = data[frame]
+        quad.set_array(arr[...,0].ravel())
+        ax.set_title(f"t = {t:.3f}")  
+        return quad,
+
+    frame_indices = list(range(0, len(data), 100))
+    ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=True)
+
     plt.show()
-
-
 
 if __name__ =="__main__":
     pass

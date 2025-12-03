@@ -115,7 +115,7 @@ class Which2DTestProblem:
 def runSim2D(which_sim: Which2DTestProblem):
     match which_sim:
         case Which2DTestProblem.IMPLOSION_TEST:
-            state_sim = ImplosionInitialization()            
+            state_sim = ImplosionInitialization(t_max=10)            
             save_frequency = 1
         case _:
             raise Exception("Unimplemented test problem")
@@ -130,13 +130,13 @@ def runSim2D(which_sim: Which2DTestProblem):
     save_results(history, state_sim)
    
 if __name__ == "__main__":
-#    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-#    Plotting.plot_results_1D()
+    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+    Plotting.plot_results_1D()
 #    runSim1D(Which1DTestProblem.HARDER_SOD)
 #    Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_Mdot_time("snapshot.pkl")
     # Plotting.plot_Mdot_position("snapshot.pkl")
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
-    #runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-    Plotting.plot_2D()
+#    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+#    Plotting.plot_2D_anim()

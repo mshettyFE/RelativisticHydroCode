@@ -3,8 +3,11 @@ import numpy as np
 from enum import Enum
 
 class CoordinateChoice(Enum):
+    # MINKOWSKI_CARTESIAN = 0 
+    # MINKOWSKI_SPHERICAL = 1
     CARTESIAN = 0 
     SPHERICAL = 1
+
 
 class WeightType(Enum):
     CENTER = 0 
@@ -14,6 +17,8 @@ class GridInfo:
     leftmost_edges: npt.NDArray
     rightmost_edges: npt.NDArray
     NCells: npt.NDArray
+    meshgrid_center: npt.NDArray
+    meshgrid_edge:  npt.NDArray
 
     def __init__(self, left: npt.ArrayLike, right: npt.ArrayLike, cell_count: npt.ArrayLike):
         assert(left.shape==right.shape)
@@ -24,6 +29,8 @@ class GridInfo:
         self.leftmost_edges = left
         self.rightmost_edges = right
         self.NCells = cell_count
+        self.meshgrid_center = self.mesh_grid(WeightType.CENTER) 
+        self.meshgrid_edge  = self.mesh_grid(WeightType.EDGE)
 
     def delta(self):
         return 1.0/(self.NCells+1.0) 
@@ -35,6 +42,15 @@ class GridInfo:
     def construct_grid_centers(self, index: np.uint):
         grid_edges = self.construct_grid_edges(index)
         return 0.5*(grid_edges[1:]+grid_edges[:-1])
+
+    def mesh_grid(self, weight_type: WeightType):
+        boundaries = []
+        match weight_type:
+            case WeightType.CENTER:
+                boundaries = [self.construct_grid_centers(i) for i in range(len(self.NCells))]
+            case WeightType.EDGE:
+                boundaries  = [self.construct_grid_edges(i) for i in range(len(self.NCells))]
+        return np.meshgrid(*boundaries)
 
     def weights(self, coordinate_system:CoordinateChoice, weight_type: WeightType):
         # Results will get broadcast to appropriate dimension
