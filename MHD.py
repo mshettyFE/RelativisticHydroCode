@@ -7,8 +7,8 @@ from UpdateSteps import SpatialUpdateType, SpatialUpdate,TimeUpdateType
 from  GridInfo import GridInfo
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
-from metrics.Metric import Metric
 from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
+from metrics.CartesianMinkowski_1_2 import CartesianMinkowski_1_2
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
@@ -113,7 +113,11 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100):
     primitives[lower, PrimitiveIndex.PRESSURE.value] = 0.125
     primitives[upper, PrimitiveIndex.DENSITY.value] = 1.0
     primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
-    return SimulationState(primitives, grid_info, bcm, simulation_params)
+    metric = CartesianMinkowski_1_2(grid_info)
+    assert(metric.dimension==3) # 1+2 
+    return SimulationState(
+        primitives,grid_info, bcm, simulation_params, metric
+    ) 
 
 class Which2DTestProblem:
     IMPLOSION_TEST=0
@@ -136,13 +140,13 @@ def runSim2D(which_sim: Which2DTestProblem):
     save_results(history, state_sim)
    
 if __name__ == "__main__":
-    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    Plotting.plot_results_1D()
+#    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+#    Plotting.plot_results_1D()
 #    runSim1D(Which1DTestProblem.HARDER_SOD)
 #    Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_Mdot_time("snapshot.pkl")
     # Plotting.plot_Mdot_position("snapshot.pkl")
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
-#    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-#    Plotting.plot_2D_anim()
+   runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+   Plotting.plot_2D_anim()

@@ -367,16 +367,14 @@ class SimulationState:
         cell_flux_minus_half = (alpha_plus*left_cell_flux_minus+ alpha_minus*right_cell_flux_minus
                                 -alpha_prod*(right_conserve_minus-left_conserve_minus))/alpha_sum 
         weights = self.metric.cell_weights(self.grid_info, WeightType.EDGE) 
-        slices_plus_half = [slice(None)]*weights.ndim
-        slices_plus_half[spatial_index] = slice(1,None, None)
+        slices_plus_half = [slice(1,None, None)]*weights.ndim
         slices_plus_half = tuple(slices_plus_half)
-        slices_minus_half = [slice(None)]*weights.ndim
-        slices_minus_half[spatial_index] = slice(1,None, None)
+        slices_minus_half = [slice(None,-1, None)]*weights.ndim
         slices_minus_half = tuple(slices_minus_half)
         cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[slices_plus_half]
-        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_plus_half]
-        cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:,...]
-        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
+        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_minus_half]
+        # cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:,...]
+        # cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
         return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta()[spatial_index], alpha_plus, alpha_minus
 
     def alpha_plus_minus(self, U_padded_cart: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
