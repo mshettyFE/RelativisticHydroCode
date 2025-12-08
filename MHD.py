@@ -4,10 +4,11 @@ import numpy.typing as npt
 import pickle as pkl
 from HydroCore import PrimitiveIndex, SimParams, SimulationState
 from UpdateSteps import SpatialUpdateType, SpatialUpdate,TimeUpdateType
-from  GridInfo import GridInfo, WeightType, CoordinateChoice
+from  GridInfo import GridInfo
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
-from matplotlib import pyplot as plt
+from metrics.Metric import Metric
+from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
@@ -24,12 +25,14 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                            t_max: np.float64 = 0.2) -> SimulationState:
     grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
-    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, coordinate_system= CoordinateChoice.CARTESIAN,
+    simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
                                   include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
     assert(primitives.ndim==2)
+    metric = CartesianMinkowski_1_1(grid_info)
+    assert(metric.dimension==2) # 1+1 
     grid_centers = grid_info.construct_grid_centers(0)
     lower_half = grid_centers<0.5 
     upper_half = grid_centers>=0.5
@@ -39,7 +42,9 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
     primitives[upper_half, PrimitiveIndex.DENSITY.value] = rho_r
     primitives[upper_half, PrimitiveIndex.PRESSURE.value] = P_r
     primitives[upper_half, PrimitiveIndex.X_VELOCITY.value] = v_r
-    return SimulationState(primitives, grid_info, bcm, simulation_params)
+    return SimulationState(
+        primitives,grid_info, bcm, simulation_params, metric
+    )
 
 def BondiAccretionInitialization(
         rho: np.float64,
@@ -49,7 +54,7 @@ def BondiAccretionInitialization(
     ):
     grid_info = GridInfo(np.array([0.5]), np.array([10.15]), np.array([N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
-    simulation_params = SimParams(1.4, 0.2, 20.0,1.0, coordinate_system= CoordinateChoice.SPHERICAL, 
+    simulation_params = SimParams(1.4, 0.2, 20.0,1.0,  
                                   include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED])
     grid_shape = grid_info.NCells
@@ -73,6 +78,7 @@ def runSim1D(which_sim: Which1DTestProblem):
             state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
         case Which1DTestProblem.BONDI_PROBLEM:
+            raise Exception("Unimplemented!")
             state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
             save_frequency = 1
         case _:
@@ -89,7 +95,7 @@ def runSim1D(which_sim: Which1DTestProblem):
 def ImplosionInitialization(t_max = 2.5, N_cells = 100):
     grid_info = GridInfo(np.array([0.0,0.0]), np.array([0.3,0.3]), np.array([N_cells,N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
-    simulation_params = SimParams(1.4, 0.5, t_max, 1.0, coordinate_system= CoordinateChoice.CARTESIAN,
+    simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
                                   include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
     bcm = BoundaryConditionManager(
             [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD], 

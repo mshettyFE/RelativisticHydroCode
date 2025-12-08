@@ -5,9 +5,10 @@ from numpy.lib._index_tricks_impl import ndindex
 from numpy.lib._arraypad_impl import _as_pairs
 from dataclasses import dataclass
 from BoundaryManager import BoundaryCondition 
-from GridInfo import GridInfo, CoordinateChoice, WeightType
+from GridInfo import GridInfo, WeightType
 from UpdateSteps import TimeUpdateType,SpatialUpdate, SpatialUpdateType
 from BoundaryManager import BoundaryConditionManager
+from metrics import CartesianMinkowski_1_1, Metric
 
 class PrimitiveIndex(Enum):
     DENSITY = 0
@@ -28,7 +29,6 @@ class SimParams:
     t_max: np.float64
     GM: np.float64
     include_source: bool
-    coordinate_system: CoordinateChoice
     time_integration: TimeUpdateType 
     spatial_integration: SpatialUpdate
 
@@ -77,9 +77,10 @@ class SimulationState:
     bcm: BoundaryConditionManager
     n_variable_dimensions: np.int64 # Number of spatial dimensions in consideration
     simulation_params: SimParams
+    metric: Metric
     current_time: np.float64 = 0.0
 
-    def __init__(self, primitive_tensor: npt.NDArray, a_grid_info: GridInfo, a_bcm: BoundaryConditionManager, sim_params: SimParams, starting_time: np.float64 = 0):
+    def __init__(self, primitive_tensor: npt.NDArray, a_grid_info: GridInfo, a_bcm: BoundaryConditionManager, sim_params: SimParams, a_metric: Metric, starting_time: np.float64 = 0):
         n_variable_dimensions = a_grid_info.NCells.shape[0]
         assert(n_variable_dimensions == len(a_bcm.left_bcs))
         self.n_variable_dimensions = n_variable_dimensions 
@@ -90,12 +91,13 @@ class SimulationState:
         self.simulation_params = sim_params
         self.grid_info = a_grid_info 
         self.bcm = a_bcm
+        self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
         padding = self.simulation_params.spatial_integration.pad_width()
         # Make sure that the last index gets skipped, since that's associated with the variables
         pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1) + [(0,0)]
         self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
-        self.U = self.grid_info.weight_system(U_unweighted_initial, sim_params.coordinate_system, WeightType.CENTER)
+        self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER)
         self.current_time = starting_time
 
     def index_conservative_var(self, U_cart: npt.ArrayLike, var_type: ConservativeIndex): 
@@ -240,7 +242,7 @@ class SimulationState:
 
     def update(self) -> tuple[np.float64, npt.NDArray]:
         # Undo scaling for input
-        U_cartesian = self.grid_info.unweight_system(self.U, self.simulation_params.coordinate_system, WeightType.CENTER)
+        U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER)
         dt, state_update_1 = self.LinearUpdate(U_cartesian)
         U_1 = self.U+dt*state_update_1
         match self.simulation_params.time_integration:
@@ -249,10 +251,10 @@ class SimulationState:
                 self.U = U_1
                 return self.current_time, self.U
             case TimeUpdateType.RK3:
-                U_scaled_1 = self.grid_info.unweight_system(U_1, self.simulation_params.coordinate_system, WeightType.CENTER)
+                U_scaled_1 = self.metric.unweight_system(U_1, self.grid_info, WeightType.CENTER)
                 _, state_update_2 = self.LinearUpdate(U_scaled_1)
                 U_2 = (3/4)*self.U+(1/4)*U_1+(1/4)*dt*state_update_2 
-                U_scaled_2 = self.grid_info.unweight_system(U_2, self.simulation_params.coordinate_system, WeightType.CENTER)
+                U_scaled_2 = self.metric.unweight_system(U_2, self.grid_info, WeightType.CENTER)
                 _, state_update_3 = self.LinearUpdate(U_scaled_2)
                 self.U = (1/3)*self.U+(2/3)*U_2+(2/3)*dt*state_update_3
                 self.current_time += dt
@@ -262,7 +264,7 @@ class SimulationState:
 
     def M_dot(self):
         r_center = self.grid_info.construct_grid_centers(0) 
-        unweighted_U = self.grid_info.unweight_system(self.U, self.simulation_params.coordinate_system, WeightType.CENTER)
+        unweighted_U = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER)
         W = self.conservative_to_primitive(unweighted_U)
         return self.index_primitive_var(W, PrimitiveIndex.DENSITY)*self.index_primitive_var(W,PrimitiveIndex.X_VELOCITY)*np.power(r_center,2)
  
@@ -364,9 +366,17 @@ class SimulationState:
                                -alpha_prod*(right_conserve_plus -left_conserve_plus))/alpha_sum 
         cell_flux_minus_half = (alpha_plus*left_cell_flux_minus+ alpha_minus*right_cell_flux_minus
                                 -alpha_prod*(right_conserve_minus-left_conserve_minus))/alpha_sum 
-        weights = self.grid_info.weights(self.simulation_params.coordinate_system, WeightType.EDGE) 
-        cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:]
-        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1]
+        weights = self.metric.cell_weights(self.grid_info, WeightType.EDGE) 
+        slices_plus_half = [slice(None)]*weights.ndim
+        slices_plus_half[spatial_index] = slice(1,None, None)
+        slices_plus_half = tuple(slices_plus_half)
+        slices_minus_half = [slice(None)]*weights.ndim
+        slices_minus_half[spatial_index] = slice(1,None, None)
+        slices_minus_half = tuple(slices_minus_half)
+        cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[slices_plus_half]
+        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_plus_half]
+        cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:,...]
+        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
         return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta()[spatial_index], alpha_plus, alpha_minus
 
     def alpha_plus_minus(self, U_padded_cart: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
