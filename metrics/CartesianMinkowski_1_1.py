@@ -42,8 +42,21 @@ class CartesianMinkowski_1_1(Metric):
         # Use self.expected_tensor_dimension() to generate expected_product_size
         return np.zeros(expected_product_size)
 
-    def Christoffel_upper0(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
-        # Fix upper index to 0 since that's the only one that's relevant for this problem
+    def Christoffel_upper(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size
         return np.zeros(expected_product_size)
+    
+    def partial_ln_alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
+        # Fix upper index to 0 since that's the only one that's relevant for this problem
+        ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
+        # Use self.expected_tensor_dimension() to generate expected_product_size
+        output = np.zeros(expected_product_size)
+        return output     
+    
+    def alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
+        # Fix upper index to 0 since that's the only one that's relevant for this problem
+        ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
+        # Use self.expected_tensor_dimension() to generate expected_product_size
+        output = np.ones(expected_product_size)
+        return output 

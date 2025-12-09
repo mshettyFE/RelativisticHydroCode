@@ -8,6 +8,7 @@ from  GridInfo import GridInfo
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
 from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
+from metrics.SphericalMinkowski_1_3 import SphericalnMinkowski_1_3
 from metrics.CartesianMinkowski_1_2 import CartesianMinkowski_1_2
 
 def save_results(
@@ -52,18 +53,25 @@ def BondiAccretionInitialization(
         P: np.float64,
         N_cells: np.float64
     ):
-    grid_info = GridInfo(np.array([0.5]), np.array([10.15]), np.array([N_cells]))
+    grid_info = GridInfo(np.array([0.5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
     simulation_params = SimParams(1.4, 0.2, 20.0,1.0,  
                                   include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
-    bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED])
+    bcm = BoundaryConditionManager(
+        [BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD]
+        )
     grid_shape = grid_info.NCells
-    primitives = np.zeros( list(grid_shape)+[3]  ) 
-    primitives[:, PrimitiveIndex.DENSITY.value] = rho
-    primitives[:, PrimitiveIndex.X_VELOCITY.value] = v
-    primitives[:, PrimitiveIndex.PRESSURE.value] = P
-    return SimulationState(primitives, grid_info, bcm, simulation_params)
-
+    primitives = np.zeros( list(grid_shape)+[5]  ) 
+    primitives[..., PrimitiveIndex.DENSITY.value] = rho
+    primitives[..., PrimitiveIndex.X_VELOCITY.value] = v # r
+    primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0 # theta
+    primitives[..., PrimitiveIndex.Z_VELOCITY.value] = 0 # phi
+    primitives[..., PrimitiveIndex.PRESSURE.value] = P
+    metric = SphericalnMinkowski_1_3(grid_info)
+    out = SimulationState(
+        primitives,grid_info, bcm, simulation_params, metric
+    )
+    return out
 class Which1DTestProblem(Enum):
     CARTESIAN_SOD=0 
     HARDER_SOD=1 
@@ -73,23 +81,26 @@ def runSim1D(which_sim: Which1DTestProblem):
     match which_sim:
         case Which1DTestProblem.CARTESIAN_SOD:
             save_frequency = 1
+            which_axes = ()
             state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
         case Which1DTestProblem.HARDER_SOD:
             state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
+            which_axes = ()
         case Which1DTestProblem.BONDI_PROBLEM:
-            raise Exception("Unimplemented!")
             state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
             save_frequency = 1
+            which_axes = tuple([0]) # Only evolve along r coordinate
         case _:
             raise Exception("Unimplemented test problem")
     history = []
     iteration = 0
     while(state_sim.current_time < state_sim.simulation_params.t_max):
-        t, state = state_sim.update()
+        t, state = state_sim.update(which_axes)
         if(iteration%save_frequency==0):
             history.append( (t,state))
         iteration += 1
+        print(t, state_sim.simulation_params.t_max)
     save_results(history, state_sim)
 
 def ImplosionInitialization(t_max = 2.5, N_cells = 100):
@@ -144,9 +155,9 @@ if __name__ == "__main__":
 #    Plotting.plot_results_1D()
 #    runSim1D(Which1DTestProblem.HARDER_SOD)
 #    Plotting.plot_results_1D()
-    # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
+#    runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_Mdot_time("snapshot.pkl")
     # Plotting.plot_Mdot_position("snapshot.pkl")
-    # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
-   runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-   Plotting.plot_2D_anim()
+    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
+#    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+#    Plotting.plot_2D_anim()

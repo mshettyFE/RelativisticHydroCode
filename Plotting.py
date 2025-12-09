@@ -30,10 +30,10 @@ def plot_results_1D(
     sim_state.U = U
     W = sim_state.conservative_to_primitive(U)
 
-    rho = sim_state.index_primitive_var( W,PrimitiveIndex.DENSITY)
-    v = sim_state.index_primitive_var( W,PrimitiveIndex.X_VELOCITY)
-    P = sim_state.index_primitive_var( W,PrimitiveIndex.PRESSURE)
-    c_s = sim_state.sound_speed(W)
+    rho = sim_state.index_primitive_var( W,PrimitiveIndex.DENSITY).flatten()
+    v = sim_state.index_primitive_var( W,PrimitiveIndex.X_VELOCITY).flatten()
+    P = sim_state.index_primitive_var( W,PrimitiveIndex.PRESSURE).flatten()
+    c_s = sim_state.sound_speed(W).flatten()
 
     label = f"t = {t:.3f}"
 
