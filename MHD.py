@@ -51,11 +51,12 @@ def BondiAccretionInitialization(
         rho: np.float64,
         v: np.float64,
         P: np.float64,
-        N_cells: np.float64
+        N_cells: np.float64,
+        t_max: np.float64 = 5
     ):
     grid_info = GridInfo(np.array([0.5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
-    simulation_params = SimParams(1.4, 0.2, 20.0,1.0,  
+    simulation_params = SimParams(1.4, 0.2, t_max,1.0,  
                                   include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
     bcm = BoundaryConditionManager(
         [BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD]
@@ -88,7 +89,7 @@ def runSim1D(which_sim: Which1DTestProblem):
             save_frequency = 100
             which_axes = ()
         case Which1DTestProblem.BONDI_PROBLEM:
-            state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100)
+            state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100, t_max=5)
             save_frequency = 1
             which_axes = tuple([0]) # Only evolve along r coordinate
         case _:
@@ -155,7 +156,7 @@ if __name__ == "__main__":
 #    Plotting.plot_results_1D()
 #    runSim1D(Which1DTestProblem.HARDER_SOD)
 #    Plotting.plot_results_1D()
-#    runSim1D(Which1DTestProblem.BONDI_PROBLEM)
+    runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_Mdot_time("snapshot.pkl")
     # Plotting.plot_Mdot_position("snapshot.pkl")
     Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True)
