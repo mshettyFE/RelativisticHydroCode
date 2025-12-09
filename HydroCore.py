@@ -8,19 +8,22 @@ from BoundaryManager import BoundaryCondition
 from GridInfo import GridInfo, WeightType
 from UpdateSteps import TimeUpdateType,SpatialUpdate, SpatialUpdateType
 from BoundaryManager import BoundaryConditionManager
-from metrics import CartesianMinkowski_1_1, Metric
+from metrics import Metric
+from metrics.Metric import WhichCacheTensor, METRIC_VARIABLE_INDEX
 
 class PrimitiveIndex(Enum):
     DENSITY = 0
     PRESSURE = 1
     X_VELOCITY = 2
     Y_VELOCITY = 3
+    Z_VELOCITY = 4
 
 class ConservativeIndex(Enum):
     DENSITY = 0
     ENERGY = 1
     X_MOMENTUM_DENSITY =2
     Y_MOMENTUM_DENSITY = 3
+    Z_MOMENTUM_DENSITY = 4
 
 @dataclass
 class SimParams:
@@ -148,8 +151,19 @@ class SimulationState:
                 return pressure /( (self.simulation_params.gamma-1) * density)  
             case _:
                 raise Exception("Unimplemented simulation dimension")
+            
+    def internal_enthalpy_primitive(self,W: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        match self.n_variable_dimensions:
+            case 1 | 2:
+                pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
+                density = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+                internal_energy  =self.internal_energy_primitive(W)
+                return 1 + internal_energy + pressure/density
+            case _:
+                raise Exception("Unimplemented simulation dimension")            
 
     def conservative_to_primitive(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        # TODO: Replace this with root finding method to acomodate SR
         match self.n_variable_dimensions:
             case 1:
                 rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
@@ -313,6 +327,7 @@ class SimulationState:
         return padded
 
     def LinearUpdate(self, U_cart: npt.ArrayLike): 
+        # TODO: Only perform 2 calls of conservative_to_primitive at the top (1 for center, 1 for edge), then transfer the primitive variables around to the relavent function calls
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
                 U_padded_cart = self.pad_unweighted_array(U_cart)
@@ -407,8 +422,26 @@ class SimulationState:
         alpha_minus_candidates = np.stack([zeros, -lambda_minus_left, -lambda_minus_right], axis=zeros.ndim)    
         alpha_minus = np.max(alpha_minus_candidates, axis=zeros.ndim)
         return (alpha_minus, alpha_plus)
+    
+    def StressEnergyTensor(self,U_cart_unpadded:npt.ArrayLike):
+        W = self.conservative_to_primitive(U_cart_unpadded)
+        metric = self.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, use_cache=True).array
+        rho  = self.index_primitive_var(W, PrimitiveIndex.DENSITY.value)
+        pressure  = self.index_primitive_var(W, PrimitiveIndex.PRESSURE.value)
+        four_vel_shape  = [*W.shape]
+        four_vel_shape[-1]  = four_vel_shape[-1]+1 # Add one for 0 component
+        four_velocities  = np.zeros (four_vel_shape)
+        four_velocities[...,1:]  =W[...,2:] # spatial components
+        four_velocities[...,0] = 1 # 0th component
+        u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
+        np.tensordot(four_velocities,four_velocities, axis=0)
+        # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
+        # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
+        u_u = np.einsum('...k,...l->kl...', a, b)
+        return rho*internal_enthalpy_primitive(W)*u_u +pressure*metric
 
     def SourceTerm(self,U_cart_unpadded:npt.ArrayLike):
+        #TODO: Modify this so that Bondi problem still works
         # Assumes that U is the array of Cartesian conservative variables. Needs to be unpadded due to construct_grid_centers call
         W = self.conservative_to_primitive(U_cart_unpadded)
         grid_centers = self.grid_info.construct_grid_centers(0)

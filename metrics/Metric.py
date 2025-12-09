@@ -236,3 +236,14 @@ class Metric(ABC):
     def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType):
         weights = self.cell_weights(grid_info, weight_type)
         return (U.T/weights).T
+    
+    def boost_field(self, W:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType,alpha=1):
+        # W is a ([ncells]*ndim,prim) where the prim denotes (\rho, P, and  up to 3 velocities)
+        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type)
+        dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
+        grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
+        index = tuple(dim_slice+grid_slice)
+        spatial_metric = metric[index] # Size of (dim,dim, gridsize)
+        velocities = W[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
+        right = np.matvec(spatial_metric.T, velocities) # Sum over last index. Size is (gridsize, dim)
+        return np.vecdot(velocities, right) 
