@@ -216,11 +216,10 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
-    def flux_from_conservative(self, U_cart: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
+    def flux_from_conservative(self, U_cart: npt.ArrayLike, primitive: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
         match self.n_variable_dimensions:
             case 1:
                 # F = (\rho v, \rho v^2 +P, (E+P) v)
-                primitive = self.conservative_to_primitive(U_cart)
                 F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
                 F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
                 F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
@@ -229,7 +228,6 @@ class SimulationState:
                 match spatial_index:
                     case  0: # x flux
                         # F = (\rho v_x, (E+P) v_x, \rho v_x^2 +P, \rho v_x v_y)
-                        primitive = self.conservative_to_primitive(U_cart)
                         F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
                         F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
                         F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
@@ -237,7 +235,6 @@ class SimulationState:
                         return np.stack([F_0,F_1,F_2,F_3], axis=2)
                     case 1: # y flux
                         # G = (\rho v_y, (E+P) v_y, \rho v_y^2 +P, \rho v_x v_y)
-                        primitive = self.conservative_to_primitive(U_cart)
                         G_0 = self.index_conservative_var(U_cart, ConservativeIndex.Y_MOMENTUM_DENSITY)
                         G_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.Y_VELOCITY)
                         G_2 = G_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
@@ -327,27 +324,30 @@ class SimulationState:
         return padded
 
     def LinearUpdate(self, U_cart: npt.ArrayLike): 
-        # TODO: Only perform 2 calls of conservative_to_primitive at the top (1 for center, 1 for edge), then transfer the primitive variables around to the relavent function calls
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
                 U_padded_cart = self.pad_unweighted_array(U_cart)
+                W_padded_cart = self.conservative_to_primitive(U_padded_cart)
                 possible_dt = []
                 state_update = np.zeros(U_cart.shape)
                 for dim in range(self.n_variable_dimensions):
-                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart, dim)
+                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart, dim)
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
                 dt = max(possible_dt)
                 if(self.simulation_params.include_source):
-                    state_update += self.SourceTerm(U_padded_cart[1:-1])
+                    # TODO: INdex variables correctly to multi dimensional prior to passing to SOurceTerm
+                    slices = [slice(1,-1, None)]*W_padded_cart.ndim # Remove ghost cells from padded grid
+                    slices += [slice(None)] # Select all of the variables 
+                    state_update += self.SourceTerm(W_padded_cart[slices])
                 return dt, state_update
             case _:
                 raise Exception("Unimplemented Spatial Update")
 
-    def spatial_derivative(self, U_padded_cart: npt.ArrayLike, spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
         # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        cell_flux = self.flux_from_conservative(U_padded_cart, spatial_index)
-        alpha_minus, alpha_plus = self.alpha_plus_minus(U_padded_cart)
+        cell_flux = self.flux_from_conservative(U_padded_cart, W_padded_cart, spatial_index)
+        alpha_minus, alpha_plus = self.alpha_plus_minus(W_padded_cart)
         alpha_sum = alpha_minus+alpha_plus 
         assert(np.all(alpha_sum != 0))
         alpha_prod = alpha_minus*alpha_plus
@@ -392,9 +392,7 @@ class SimulationState:
         # cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
         return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta()[spatial_index], alpha_plus, alpha_minus
 
-    def alpha_plus_minus(self, U_padded_cart: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        U = U_padded_cart
-        primitives = self.conservative_to_primitive(U)
+    def alpha_plus_minus(self, primitives: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         c_s = self.sound_speed(primitives)
         lambda_plus = primitives[...,PrimitiveIndex.X_VELOCITY.value]+c_s
         lambda_minus = primitives[...,PrimitiveIndex.X_VELOCITY.value]-c_s
@@ -423,15 +421,14 @@ class SimulationState:
         alpha_minus = np.max(alpha_minus_candidates, axis=zeros.ndim)
         return (alpha_minus, alpha_plus)
     
-    def StressEnergyTensor(self,U_cart_unpadded:npt.ArrayLike):
-        W = self.conservative_to_primitive(U_cart_unpadded)
+    def StressEnergyTensor(self,W_cart_unpadded:npt.ArrayLike):
         metric = self.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, use_cache=True).array
-        rho  = self.index_primitive_var(W, PrimitiveIndex.DENSITY.value)
-        pressure  = self.index_primitive_var(W, PrimitiveIndex.PRESSURE.value)
-        four_vel_shape  = [*W.shape]
+        rho  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY.value)
+        pressure  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE.value)
+        four_vel_shape  = [*W_cart_unpadded.shape]
         four_vel_shape[-1]  = four_vel_shape[-1]+1 # Add one for 0 component
         four_velocities  = np.zeros (four_vel_shape)
-        four_velocities[...,1:]  =W[...,2:] # spatial components
+        four_velocities[...,1:]  =W_cart_unpadded[...,2:] # spatial components
         four_velocities[...,0] = 1 # 0th component
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         np.tensordot(four_velocities,four_velocities, axis=0)
@@ -440,17 +437,23 @@ class SimulationState:
         u_u = np.einsum('...k,...l->kl...', a, b)
         return rho*internal_enthalpy_primitive(W)*u_u +pressure*metric
 
-    def SourceTerm(self,U_cart_unpadded:npt.ArrayLike):
+    def SourceTerm(self,W:npt.ArrayLike):
         #TODO: Modify this so that Bondi problem still works
-        # Assumes that U is the array of Cartesian conservative variables. Needs to be unpadded due to construct_grid_centers call
-        W = self.conservative_to_primitive(U_cart_unpadded)
-        grid_centers = self.grid_info.construct_grid_centers(0)
+        # Assumes that W is the array of Cartesian primitive variables. Needs to be unpadded due to construct_grid_centers call
+        grid_centers = self.grid_info.mesh_grid(WeightType.CENTER)
         # primitive variables 
         # W = (\rho, v, P)
-        S_0 = np.zeros(grid_centers.shape)
-        S_1 = 1.0*(2*W[:,PrimitiveIndex.PRESSURE.value]*grid_centers-W[:,PrimitiveIndex.DENSITY.value]*self.simulation_params.GM)
-        S_2 = 1.0*(-W[:,PrimitiveIndex.DENSITY.value]*W[:,PrimitiveIndex.X_VELOCITY.value]*self.simulation_params.GM) 
-        return np.stack([S_0,S_1,S_2], axis=1) 
+        match self.n_variable_dimensions:
+            case 1:
+                S_0 = np.zeros(grid_centers.shape)
+                pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE.value)
+                density =  self.index_primitive_var(W, PrimitiveIndex.DENSITY.value)
+                x_vel = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY.value)
+                S_1 = 1.0*(2*pressure*grid_centers-density*self.simulation_params.GM)
+                S_2 = 1.0*(-density*x_vel*self.simulation_params.GM) 
+                return np.stack([S_0,S_1,S_2], axis=1) 
+            case _:
+                raise Exception("Umimplemented spatial dimension for Source Term")
 
     def calc_dt(self, alpha_plus: npt.ArrayLike, alpha_minus:npt.ArrayLike):
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
