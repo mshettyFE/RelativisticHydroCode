@@ -89,7 +89,7 @@ def runSim1D(which_sim: Which1DTestProblem):
             save_frequency = 100
             which_axes = ()
         case Which1DTestProblem.BONDI_PROBLEM:
-            state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100, t_max=100)
+            state_sim = BondiAccretionInitialization(1.0, 0.0, 0.1, 100, t_max=10)
             save_frequency = 1
             which_axes = tuple([0]) # Only evolve along r coordinate
         case _:
@@ -159,6 +159,6 @@ if __name__ == "__main__":
 #    runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_Mdot_time("snapshot.pkl")
     # Plotting.plot_Mdot_position("snapshot.pkl")
-    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
+#    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
 #    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
 #    Plotting.plot_2D_anim()5098690  

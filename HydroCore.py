@@ -135,7 +135,7 @@ class SimulationState:
         raise Exception("Trying to index momentum that is larger than the imension of the problem")
 
     def primitive_to_conservative(self, W: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        # TODO: Replace with SR version
+        # TODO: Replace with SR version (Straightforward, just plug in definitions)
         match self.n_variable_dimensions:
             case 1:
                 rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
@@ -173,6 +173,9 @@ class SimulationState:
 
     def conservative_to_primitive(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
         # TODO: Replace this with root finding method to acomodate SR
+        # Root finder will use NR to calculate pressure
+        # Once converged, use equations in Marti et. al to spit out estimated density and velocities
+        # Bundle up in primitive variable tensor
         match self.n_variable_dimensions:
             case 1:
                 rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
@@ -199,13 +202,14 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def equation_of_state_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
+        # TODO: This is unnecessary when using SR
         e = np.clip(self.internal_energy_conservative(U_cart), a_min=1E-9, a_max=None)
         assert np.all(e>=0)
         return (self.simulation_params.gamma-1)*self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)*e
 
 
     def internal_energy_conservative(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        # TODO: Modify to work with SR
+        # TODO: This is unnecessary when using SR
         match self.n_variable_dimensions:
             case 1:
                 rho = self.index_conservative_var(U_cart,ConservativeIndex.DENSITY)
@@ -245,7 +249,8 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
 
     def flux_from_conservative(self, U_cart: npt.ArrayLike, primitive: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
-        # TODO: Modify to work with SR
+        # TODO: Modify to work with SR. Straight forward, assuming that primitives are already calculated using NR
+        # Just Plug in formulas from Jose paper
         match self.n_variable_dimensions:
             case 1:
                 # F = (\rho v, \rho v^2 +P, (E+P) v)
@@ -461,25 +466,25 @@ class SimulationState:
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
         u_u = np.einsum('...k,...l->kl...', four_velocities, four_velocities)
-        return rho*self.internal_enthalpy_primitive(W_cart_unpadded)*u_u +pressure*metric
+        t_mu_nu_raised = rho*self.internal_enthalpy_primitive(W_cart_unpadded)*u_u +pressure*metric
+        return t_mu_nu_raised
 
     def SourceTerm(self,W:npt.ArrayLike):
-        #TODO: Modify this so that Bondi problem still works. Use np.einsum to implement this
         # Assumes that W is the array of Cartesian primitive variables. Needs to be unpadded due to construct_grid_centers call
         # primitive variables 
         # W = (\rho, P, v_{j})
 
         output = np.zeros(W.shape)
-        # Hack to check if Bondi works 
-        gri  =self.grid_info.mesh_grid(WeightType.CENTER)
-        rho  =self.index_primitive_var(W, PrimitiveIndex.DENSITY)
-        pressure  =self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
-        output[..., 0]  = 0 # density
-        output[..., 1]  = -rho*self.index_primitive_var(W,PrimitiveIndex.X_VELOCITY)*self.simulation_params.GM #energy
-        output[..., 2]  = 2*gri[0]*pressure-rho*self.simulation_params.GM # momentum
-        output[..., 3]  = 0 
-        output[..., 4]  = 0 
-        return output
+        # Hack to make Bondi work without implementing Source Term w.r.t. Metric and stress energy
+        # gri  =self.grid_info.mesh_grid(WeightType.CENTER)
+        # rho  =self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        # pressure  =self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
+        # output[..., 0]  = 0 # density
+        # output[..., 1]  = -rho*self.index_primitive_var(W,PrimitiveIndex.X_VELOCITY)*self.simulation_params.GM #energy
+        # output[..., 2]  = 2*gri[0]*pressure-rho*self.simulation_params.GM # momentum
+        # output[..., 3]  = 0 
+        # output[..., 4]  = 0 
+        # return output
         T_mu_nu_raised = self.StressEnergyTensor(W)
         metric: Metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC,  WeightType.CENTER).array
         partial_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_DER,  WeightType.CENTER).array
@@ -492,13 +497,11 @@ class SimulationState:
         assert(tau_first.shape == tau_second.shape)
         assert(alpha.shape == tau_first.shape)
         energy_source = alpha*(tau_first+tau_second)
-        flux_inner_part_two = np.einsum("kij...,kl...->ijl...", Christoffel_upper, metric)
-        # partial_metric: \mu, \nu j
-        # inner part two: \nu \mu j
-        # In principle, should swap the first and 2nd axes, but Christoffels and metric symmetric in those, so it shouldn't matter (metric implementation needs to reflect this though)
+        flux_inner_part_two = np.einsum("kij...,kl...->jil...", Christoffel_upper, metric)
         assert(partial_metric.shape == flux_inner_part_two.shape)
-        flux_inner_part = partial_metric-flux_inner_part_two
-        source_flux = np.einsum("ij...,ijk...", T_mu_nu_raised, flux_inner_part)
+        source_flux_part_one = np.einsum("ij...,ijk...->...k", T_mu_nu_raised,partial_metric)
+        source_flux_part_two = np.einsum("ij...,ijk...->...k", T_mu_nu_raised, flux_inner_part_two)
+        source_flux = source_flux_part_one-source_flux_part_two
         output[...,ConservativeIndex.DENSITY.value] = rho_source
         output[...,ConservativeIndex.ENERGY.value] = energy_source
         output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = source_flux[..., METRIC_VARIABLE_INDEX.SPACE_1.value:]

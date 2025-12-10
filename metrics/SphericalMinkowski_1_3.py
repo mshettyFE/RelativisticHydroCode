@@ -22,7 +22,7 @@ class SphericalnMinkowski_1_3(Metric):
 
     def metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...]) ->  npt.NDArray[np.float64]:
         # Use self.expected_tensor_dimension() to generate expected_product_size
-        # ds^{2} = dr^2 + r^2d\theta^2+r^2 \sin^{2}\theta d\phi^{2}
+        # ds^{2} = -dt^{2}+dr^2 + r^2d\theta^2+r^2 \sin^{2}\theta d\phi^{2}
         output = np.zeros(expected_product_size)
         output[METRIC_VARIABLE_INDEX.TIME.value, METRIC_VARIABLE_INDEX.TIME.value,...] = -1
         output[METRIC_VARIABLE_INDEX.SPACE_1.value, METRIC_VARIABLE_INDEX.SPACE_1.value,...] = 1
@@ -38,7 +38,7 @@ class SphericalnMinkowski_1_3(Metric):
         output[METRIC_VARIABLE_INDEX.SPACE_1.value, METRIC_VARIABLE_INDEX.SPACE_1.value,...] = 1
         r_minus_2  =np.power(mesh_grid[0],-2) # r^2
         output[METRIC_VARIABLE_INDEX.SPACE_2.value, METRIC_VARIABLE_INDEX.SPACE_2.value,...] = r_minus_2
-        output[METRIC_VARIABLE_INDEX.SPACE_2.value, METRIC_VARIABLE_INDEX.SPACE_2.value,...] = r_minus_2* np.power( np.sin(mesh_grid[1]),-2) # 1/(r^2\sin^{\theta})
+        output[METRIC_VARIABLE_INDEX.SPACE_2.value, METRIC_VARIABLE_INDEX.SPACE_2.value,...] = r_minus_2* np.power( np.sin(mesh_grid[1]),-2) # 1/(r^2\sin^2(\theta))
         return output 
 
     def determinant(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) -> npt.NDArray[np.float64]:
@@ -50,7 +50,7 @@ class SphericalnMinkowski_1_3(Metric):
     def partial_derivative(self, mesh_grid: Tuple[npt.NDArray[np.float64],...] , expected_product_size: Tuple[int,...]) ->  npt.NDArray[np.float64]:
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size
-        # Only R (SPACE_1) an theta (Space_2) have partial erivatives
+        # Only R (SPACE_1) an theta (Space_2) have partial derivatives
         output  =np.zeros(expected_product_size)
         output[METRIC_VARIABLE_INDEX.SPACE_1.value,METRIC_VARIABLE_INDEX.SPACE_2.value, METRIC_VARIABLE_INDEX.SPACE_2.value,...]  =  2*mesh_grid[0] #2r
         output[METRIC_VARIABLE_INDEX.SPACE_1.value,METRIC_VARIABLE_INDEX.SPACE_3.value, METRIC_VARIABLE_INDEX.SPACE_3.value,...]  =  2*mesh_grid[0]*np.power(np.sin(mesh_grid[1]),2) #2r \sin^{2}\theta
