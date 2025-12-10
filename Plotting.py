@@ -3,13 +3,16 @@ import pickle as pkl
 import numpy as np
 from matplotlib.animation import FuncAnimation
 from HydroCore import PrimitiveIndex, SimulationState
+from GridInfo import WeightType
+from metrics import Metric
 
 def plot_results_1D(
     input_pkl_file: str = "snapshot.pkl",
     filename: str = "sod_shock_evolution.png",
     title: str = "Sod Shock Tube Evolution (HLL Flux)",
     xlabel: str = "x",
-    show_mach: bool = False
+    show_mach: bool = False,
+    which_slice: int = -1
 ):
 # GPT generated w/ edits b/c plotting is a pain...
 # Prompt was that after debugging the above, it offered to plot the results 
@@ -17,6 +20,7 @@ def plot_results_1D(
 # I also cleaned up extraneous variables and the like
     with open(input_pkl_file, 'rb') as f:
         history, sim_state = pkl.load(f)
+    sim_state.metric.sanity_check(sim_state.grid_info)
     N = history[0][1].shape[0]
     support = sim_state.grid_info.construct_grid_centers(0)
     assert(N==support.shape[0])
@@ -26,9 +30,10 @@ def plot_results_1D(
     else:
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
 
-    t, U = history[-1]
+    t, U = history[which_slice]
     sim_state.U = U
-    W = sim_state.conservative_to_primitive(U)
+    U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER)
+    W = sim_state.conservative_to_primitive(U_cart)
 
     rho = sim_state.index_primitive_var( W,PrimitiveIndex.DENSITY).flatten()
     v = sim_state.index_primitive_var( W,PrimitiveIndex.X_VELOCITY).flatten()

@@ -384,7 +384,8 @@ class SimulationState:
                     slices = [slice(1,-1, None)]*(W_padded_cart.ndim-1) # Remove ghost cells from padded grid
                     slices += [slice(None)] # Select all of the variables 
                     slices = tuple(slices)
-                    state_update += self.SourceTerm(W_padded_cart[slices])
+                    source_term = self.SourceTerm(W_padded_cart[slices]) 
+                    state_update += self.metric.weight_system(source_term, self.grid_info, WeightType.CENTER)
                 return dt, state_update
             case _:
                 raise Exception("Unimplemented Spatial Update")
@@ -467,7 +468,18 @@ class SimulationState:
         # Assumes that W is the array of Cartesian primitive variables. Needs to be unpadded due to construct_grid_centers call
         # primitive variables 
         # W = (\rho, P, v_{j})
+
         output = np.zeros(W.shape)
+        # Hack to check if Bondi works 
+        gri  =self.grid_info.mesh_grid(WeightType.CENTER)
+        rho  =self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        pressure  =self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
+        output[..., 0]  = 0 # density
+        output[..., 1]  = -rho*self.index_primitive_var(W,PrimitiveIndex.X_VELOCITY)*self.simulation_params.GM #energy
+        output[..., 2]  = 2*gri[0]*pressure-rho*self.simulation_params.GM # momentum
+        output[..., 3]  = 0 
+        output[..., 4]  = 0 
+        return output
         T_mu_nu_raised = self.StressEnergyTensor(W)
         metric: Metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC,  WeightType.CENTER).array
         partial_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_DER,  WeightType.CENTER).array
