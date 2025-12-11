@@ -4,3 +4,4 @@
 *.pkl
 /__pycache__
 metrics/__pycache__
+tests/__pycache__

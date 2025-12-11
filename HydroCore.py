@@ -79,6 +79,7 @@ def boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
     U_initial_unweighted_padded: npt.ArrayLike # Initial conditions of the sim. Used for boundary conditions
+    primitive_previous: npt.ArrayLike
     grid_info: GridInfo
     bcm: BoundaryConditionManager
     n_variable_dimensions: np.int64 # Number of spatial dimensions in consideration
@@ -95,16 +96,21 @@ class SimulationState:
         assert(n_variables >=3) # Need density, at least 1 velocity, and pressure 
         assert(n_variables-2==n_variable_dimensions) # Number of velocities should equal the spatial dimension
         self.simulation_params = sim_params
+        self.primitive_previous = primitive_tensor
         self.grid_info = a_grid_info 
         self.bcm = a_bcm
         self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
         padding = self.simulation_params.spatial_integration.pad_width()
-        # Make sure that the last index gets skipped, since that's associated with the variables
-        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1) + [(0,0)]
+        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)]
         self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
         self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER)
         self.current_time = starting_time
+        # Purely spatial dirac delta field for flux tensor calculation
+        spatial_dims = [self.n_variable_dimensions]*2+[*self.U_initial_unweighted_padded[...,0].shape]
+        self.dirac_delta_constant = np.zeros(spatial_dims) ## (grisize, spatial, spatial)
+        for i in range(self.n_variable_dimensions):
+            self.dirac_delta_constant [i,i,...] = 1
 
     def index_conservative_var(self, U_cart: npt.ArrayLike, var_type: ConservativeIndex): 
         match self.n_variable_dimensions:
@@ -134,29 +140,46 @@ class SimulationState:
             return primitive[..., var_type.value] 
         raise Exception("Trying to index momentum that is larger than the imension of the problem")
 
-    def primitive_to_conservative(self, W: npt.ArrayLike) -> npt.NDArray[np.float64]:
+    def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER) -> npt.NDArray[np.float64]:
         # TODO: Replace with SR version (Straightforward, just plug in definitions)
-        match self.n_variable_dimensions:
-            case 1:
-                rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
-                x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
-                E = rho * self.internal_energy_primitive(W) + 0.5*rho*np.power(x_velocity,2)
-                return np.stack([rho, E, rho*x_velocity], axis= self.n_variable_dimensions) 
-            case 2:
-                rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
-                x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
-                y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
-                E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2))
-                return np.stack([rho, E, rho*x_velocity, rho*y_velocity], axis=self.n_variable_dimensions)
-            case 3:
-                rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
-                x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
-                y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
-                z_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
-                E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2)+np.power(z_velocity,2))
-                return np.stack([rho, E, rho*x_velocity, rho*y_velocity, rho*z_velocity], axis=self.n_variable_dimensions)
-            case _:
-                raise Exception("Unimplemented spatial dimension")
+        output = np.zeros(W.shape)
+        rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
+        # Relativistic
+        # enthalpy = self.internal_enthalpy_primitive(W)
+        # boost = self.metric.boost_field(W, self.grid_info,weight_type)
+        # D = rho*boost
+        # output[...,ConservativeIndex.DENSITY.value] = D
+        # output[...,ConservativeIndex.ENERGY.value] = rho*enthalpy*np.power(boost,2)-pressure-D
+        # output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*enthalpy*np.power(boost,2)*(W[...,PrimitiveIndex.X_VELOCITY.value:].T)).T
+        # Non-relativistic
+        output[...,ConservativeIndex.DENSITY.value] = rho
+        velocities = W[...,2:]
+        v_mag_2 = np.vecdot(velocities, velocities)
+        output[...,ConservativeIndex.ENERGY.value] =  rho* self.internal_energy_primitive(W)+0.5*rho*v_mag_2
+        output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
+        return output
+        # match self.n_variable_dimensions:
+        #     case 1:
+        #         rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        #         x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
+        #         E = rho * self.internal_energy_primitive(W) + 0.5*rho*np.power(x_velocity,2)
+        #         return np.stack([rho, E, rho*x_velocity], axis= self.n_variable_dimensions) 
+        #     case 2:
+        #         rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        #         x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
+        #         y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
+        #         E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2))
+        #         return np.stack([rho, E, rho*x_velocity, rho*y_velocity], axis=self.n_variable_dimensions)
+        #     case 3:
+        #         rho = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
+        #         x_velocity = self.index_primitive_var(W, PrimitiveIndex.X_VELOCITY)
+        #         y_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
+        #         z_velocity = self.index_primitive_var(W, PrimitiveIndex.Y_VELOCITY)
+        #         E = rho * self.internal_energy_primitive(W) + 0.5*rho*(np.power(x_velocity,2)+np.power(y_velocity,2)+np.power(z_velocity,2))
+        #         return np.stack([rho, E, rho*x_velocity, rho*y_velocity, rho*z_velocity], axis=self.n_variable_dimensions)
+        #     case _:
+        #         raise Exception("Unimplemented spatial dimension")
 
     def internal_energy_primitive(self,W: npt.ArrayLike) -> npt.NDArray[np.float64]:
         pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
@@ -248,50 +271,6 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented simulation dimension")
 
-    def flux_from_conservative(self, U_cart: npt.ArrayLike, primitive: npt.ArrayLike, spatial_index: int=0) -> npt.NDArray[np.float64]:
-        # TODO: Modify to work with SR. Straight forward, assuming that primitives are already calculated using NR
-        # Just Plug in formulas from Jose paper
-        match self.n_variable_dimensions:
-            case 1:
-                # F = (\rho v, \rho v^2 +P, (E+P) v)
-                F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
-                F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
-                F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
-                return np.stack([F_0,F_1,F_2], axis=1)
-            case 2:
-                match spatial_index:
-                    case  0: # x flux
-                        # F = (\rho v_x, (E+P) v_x, \rho v_x^2 +P, \rho v_x v_y)
-                        F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
-                        F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
-                        F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
-                        F_3 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)
-                        return np.stack([F_0,F_1,F_2,F_3], axis=2)
-                    case 1: # y flux
-                        # G = (\rho v_y, (E+P) v_y, \rho v_y^2 +P, \rho v_x v_y)
-                        G_0 = self.index_conservative_var(U_cart, ConservativeIndex.Y_MOMENTUM_DENSITY)
-                        G_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.Y_VELOCITY)
-                        G_2 = G_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
-                        G_3 = G_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)
-                        return np.stack([G_0,G_1,G_2,G_3], axis=2)
-                    case _:
-                        raise Exception("Invalid flux direction")
-            case 3:
-                match spatial_index:
-                    case  0: # x flux
-                        # F = (\rho v_x, (E+P) v_x, \rho v_x^2 +P, \rho v_x v_y)
-                        F_0 = self.index_conservative_var(U_cart, ConservativeIndex.X_MOMENTUM_DENSITY)
-                        F_1 = (self.index_conservative_var(U_cart, ConservativeIndex.ENERGY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE))*self.index_primitive_var(primitive,PrimitiveIndex.X_VELOCITY)
-                        F_2 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.X_VELOCITY)+self.index_primitive_var(primitive, PrimitiveIndex.PRESSURE)
-                        F_3 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.Y_VELOCITY)
-                        F_4 = F_0*self.index_primitive_var(primitive, PrimitiveIndex.Z_VELOCITY)
-                        return np.stack([F_0,F_1,F_2,F_3,F_4], axis=3)
-                    case _:
-                        # NOTE: Hack to get Bondi working. Need to fix this later
-                        raise Exception("Invalid flux direction")
-            case _:
-                raise Exception("Unimplemented simulation dimension")
-
     def sound_speed(self, W: npt.ArrayLike):
         pressure = self.index_primitive_var(W, PrimitiveIndex.PRESSURE)
         density = self.index_primitive_var(W, PrimitiveIndex.DENSITY)
@@ -380,8 +359,13 @@ class SimulationState:
                     axes = tuple(range(self.n_variable_dimensions))
                 else:
                     axes = which_axis
+                density_flux = self.density_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
+                tau_flux = self.tau_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
+                momentum_flux_tensor = self.momentum_flux_tensor(U_padded_cart,W_padded_cart, WeightType.CENTER)
                 for dim in axes:
-                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart, dim)
+                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart,
+                                                                                   density_flux, momentum_flux_tensor, tau_flux,
+                                                                                       dim)
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
                 dt = max(possible_dt)
@@ -394,10 +378,47 @@ class SimulationState:
                 return dt, state_update
             case _:
                 raise Exception("Unimplemented Spatial Update")
+    
+    def density_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
+        # (gridsize, spatial_index)
+        D = U_padded_cart[...,ConservativeIndex.DENSITY.value]
+        velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
+        return (D*velocity.T).T
 
-    def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    def momentum_flux_tensor(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
+        # (gridsize, spatial_index, spatial_index) where the first indexes the coordinate and the 2nd indexes the direction
+        density = W_padded_cart[...,PrimitiveIndex.DENSITY.value]
+        velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
+        pressure = self.index_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE)
+        pressure_tensor = pressure*self.dirac_delta_constant
+        KE = density*np.einsum("...i,...j->ij...", velocity, velocity)
+        output = np.einsum("ij...->...ij", KE+pressure_tensor)
+        return output
+    
+    def tau_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
+        # (gridsize, spatial_index)
+        Energy =  self.index_conservative_var(U_padded_cart, ConservativeIndex.ENERGY)
+        pressure = self.index_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE)
+        velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
+        return ((Energy+pressure)*velocity.T).T
+
+    def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
+                           density_flux: npt.ArrayLike, momentum_flux_tensor: npt.ArrayLike, tau_flux: npt.ArrayLike,
+                             spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
         # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        cell_flux = self.flux_from_conservative(U_padded_cart, W_padded_cart, spatial_index)
+        zero  =  density_flux[...,spatial_index]
+        target = [*zero.shape]+[1]
+        zero = zero.reshape(target)
+        first  = tau_flux[...,spatial_index]
+        first = first.reshape(target)
+        rest  = momentum_flux_tensor[...,spatial_index,:]
+        cell_flux = np.concatenate(
+            [
+                zero,
+                first,
+                rest
+            ], 
+            axis=-1)
         alpha_minus, alpha_plus = self.alpha_plus_minus(W_padded_cart)
         alpha_sum = alpha_minus+alpha_plus 
         assert(np.all(alpha_sum != 0))
@@ -453,6 +474,7 @@ class SimulationState:
         return (alpha_minus, alpha_plus)
     
     def StressEnergyTensor(self,W_cart_unpadded:npt.ArrayLike):
+        # TODO: Change 4 vector to include normalization factor
         metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, use_cache=True).array
         rho  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY)
         pressure  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE)

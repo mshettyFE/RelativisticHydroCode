@@ -204,15 +204,16 @@ class Metric(ABC):
     
     def boost_field(self, W:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType,alpha=1):
         # W is a ([ncells]*ndim,prim) where the prim denotes (\rho, P, and  up to 3 velocities)
-        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type)
+        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type).array
+        alpha =  self.get_metric_product(grid_info, WhichCacheTensor.ALPHA,  weight_type).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
         spatial_metric = metric[index] # Size of (dim,dim, gridsize)
         velocities = W[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
         right = np.matvec(spatial_metric.T, velocities) # Sum over last index. Size is (gridsize, dim)
-        return np.vecdot(velocities, right) 
-
+        return alpha*np.power(1-np.vecdot(velocities, right), -0.5)
+    
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType, use_cache =True) -> cached_array:
         if(use_cache):
             output, success = self.retrieve_cache(weight_type, which_cache)

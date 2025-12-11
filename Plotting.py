@@ -117,11 +117,11 @@ def plot_2D_anim(
     def update(frame):
         t, arr = data[frame]
         quad.set_array(arr[...,0].ravel())
-        ax.set_title(f"t = {t:.3f}")  
-        return quad,
+        ax.title.set_text(f"t = {t:.3f}")  
+        return quad, ax.title
 
     frame_indices = list(range(0, len(data), 100))
-    ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=True)
+    ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=False)
 
     plt.show()
 
