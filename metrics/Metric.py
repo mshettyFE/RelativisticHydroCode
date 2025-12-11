@@ -209,10 +209,11 @@ class Metric(ABC):
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
-        spatial_metric = metric[index] # Size of (dim,dim, gridsize)
+        spatial_metric = np.einsum("ij...->...ij",metric[index]) # Size of (dim,dim, gridsize)
         velocities = W[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
-        right = np.matvec(spatial_metric.T, velocities) # Sum over last index. Size is (gridsize, dim)
-        return alpha*np.power(1-np.vecdot(velocities, right), -0.5)
+        right = np.matvec(spatial_metric, velocities) # Sum over last index. Size is (gridsize, dim)
+        mag = np.vecdot(velocities, right)
+        return alpha*np.power(1-mag, -0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType, use_cache =True) -> cached_array:
         if(use_cache):

@@ -157,7 +157,7 @@ class SimulationState:
         velocities = W[...,2:]
         v_mag_2 = np.vecdot(velocities, velocities)
         output[...,ConservativeIndex.ENERGY.value] =  rho* self.internal_energy_primitive(W)+0.5*rho*v_mag_2
-        output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
+        output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho.T*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
         return output
         # match self.n_variable_dimensions:
         #     case 1:
@@ -383,7 +383,7 @@ class SimulationState:
         # (gridsize, spatial_index)
         D = U_padded_cart[...,ConservativeIndex.DENSITY.value]
         velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
-        return (D*velocity.T).T
+        return (D.T*velocity.T).T
 
     def momentum_flux_tensor(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index, spatial_index) where the first indexes the coordinate and the 2nd indexes the direction
@@ -400,7 +400,7 @@ class SimulationState:
         Energy =  self.index_conservative_var(U_padded_cart, ConservativeIndex.ENERGY)
         pressure = self.index_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE)
         velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
-        return ((Energy+pressure)*velocity.T).T
+        return ((Energy+pressure).T*velocity.T).T
 
     def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
                            density_flux: npt.ArrayLike, momentum_flux_tensor: npt.ArrayLike, tau_flux: npt.ArrayLike,
@@ -474,7 +474,7 @@ class SimulationState:
         return (alpha_minus, alpha_plus)
     
     def StressEnergyTensor(self,W_cart_unpadded:npt.ArrayLike):
-        # TODO: Change 4 vector to include normalization factor
+        # TODO: Change 4 vector to include normalization factor (Did for SR, need to generalize to GR)
         metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, use_cache=True).array
         rho  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY)
         pressure  = self.index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE)
@@ -484,6 +484,8 @@ class SimulationState:
         four_velocities  = np.zeros (four_vel_shape)
         four_velocities[...,1:]  = velocities # spatial components
         four_velocities[...,0] = 1 # 0th component
+        boost = self.metric.boost_field(W_cart_unpadded, self.grid_info,WeightType.CENTER)
+        four_velocities = (boost.T*four_velocities.T).T
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
