@@ -5,6 +5,8 @@ from matplotlib.animation import FuncAnimation
 from HydroCore import PrimitiveIndex, SimulationState
 from GridInfo import WeightType
 from metrics import Metric
+from GuessPrimitives import sound_speed
+from HelperFunctions import index_primitive_var
 
 def plot_results_1D(
     input_pkl_file: str = "snapshot.pkl",
@@ -35,10 +37,10 @@ def plot_results_1D(
     U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER)
     W = sim_state.conservative_to_primitive(U_cart)
 
-    rho = sim_state.index_primitive_var( W,PrimitiveIndex.DENSITY).flatten()
-    v = sim_state.index_primitive_var( W,PrimitiveIndex.X_VELOCITY).flatten()
-    P = sim_state.index_primitive_var( W,PrimitiveIndex.PRESSURE).flatten()
-    c_s = sim_state.sound_speed(W).flatten()
+    rho = index_primitive_var( W,PrimitiveIndex.DENSITY,sim_state.n_variable_dimensions).flatten()
+    v = index_primitive_var( W,PrimitiveIndex.X_VELOCITY,sim_state.n_variable_dimensions).flatten()
+    P = index_primitive_var( W,PrimitiveIndex.PRESSURE,sim_state.n_variable_dimensions).flatten()
+    c_s = sound_speed(sim_state.simulation_params, P, rho).flatten()
 
     label = f"t = {t:.3f}"
 

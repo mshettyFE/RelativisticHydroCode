@@ -83,7 +83,7 @@ def runSim1D(which_sim: Which1DTestProblem):
         case Which1DTestProblem.CARTESIAN_SOD:
             save_frequency = 1
             which_axes = ()
-            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=100, t_max=0.1) 
+            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
         case Which1DTestProblem.HARDER_SOD:
             state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
@@ -153,13 +153,11 @@ def runSim2D(which_sim: Which2DTestProblem):
 
 if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
-#    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-#    Plotting.plot_results_1D()
-#    runSim1D(Which1DTestProblem.HARDER_SOD)
-#    Plotting.plot_results_1D()
+    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+    Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.HARDER_SOD)
+    # Plotting.plot_results_1D()
 #   runSim1D(Which1DTestProblem.BONDI_PROBLEM)
-    # Plotting.plot_Mdot_time("snapshot.pkl")
-    # Plotting.plot_Mdot_position("snapshot.pkl")
-    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
+    # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
     # Plotting.plot_2D_anim()
