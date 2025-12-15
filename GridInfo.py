@@ -43,6 +43,8 @@ class GridInfo:
                 boundaries = [self.construct_grid_centers(i) for i in range(len(self.NCells))]
             case WeightType.EDGE:
                 boundaries  = [self.construct_grid_edges(i) for i in range(len(self.NCells))]
+            case _:
+                raise Exception("Invalid Weight type")
         out = np.meshgrid(*boundaries,indexing='ij')
         return out
 

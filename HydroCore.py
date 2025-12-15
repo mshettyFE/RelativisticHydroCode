@@ -9,8 +9,9 @@ from BoundaryManager import BoundaryConditionManager
 from metrics import Metric
 from metrics.Metric import WhichCacheTensor, METRIC_VARIABLE_INDEX
 from HelperFunctions import *
-from GuessPrimitives import sound_speed
+from GuessPrimitives import *
 from EquationOfState import *
+from scipy.optimize import newton
 
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
@@ -40,6 +41,8 @@ class SimulationState:
         padding = self.simulation_params.spatial_integration.pad_width()
         pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)]
         self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
+        self.W_initial_unweighted_padded = np.pad(primitive_tensor, pad_width, initial_value_boundary_padding) 
+        assert(self.W_initial_unweighted_padded.shape == self.U_initial_unweighted_padded.shape)
         self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER)
         self.current_time = starting_time
         # Purely spatial dirac delta field for flux tensor calculation
@@ -55,65 +58,69 @@ class SimulationState:
         internal_energy  =equation_of_state_primitive(self.simulation_params, pressure, density )
         return 1 + internal_energy + pressure/density
 
-    def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER, is_relativistic: WhichRegime= WhichRegime.NEWTONIAN ) -> npt.NDArray[np.float64]:
-        # TODO: Replace with SR version (Straightforward, just plug in definitions)
+    def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER ) -> npt.NDArray[np.float64]:
         output = np.zeros(W.shape)
         rho = index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
         pressure = index_primitive_var(W, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
-        # Relativistic
-        # enthalpy = self.internal_enthalpy_primitive(W)
-        # boost = self.metric.boost_field(W, self.grid_info,weight_type)
-        # D = rho*boost
-        # output[...,ConservativeIndex.DENSITY.value] = D
-        # output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
-        # output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*enthalpy*np.power(boost,2)*(W[...,PrimitiveIndex.X_VELOCITY.value:].T)).T
-        # Non-relativistic
-        output[...,ConservativeIndex.DENSITY.value] = rho
-        velocities_squared = np.power(W[...,PrimitiveIndex.X_VELOCITY.value:],2)
-        v_mag_2 = np.sum(velocities_squared, axis=tuple(range(PrimitiveIndex.X_VELOCITY.value, velocities_squared.ndim))).T
-        tau = rho* equation_of_state_primitive(self.simulation_params, pressure, rho)+0.5*rho*v_mag_2
-        output[...,ConservativeIndex.TAU.value] =  tau
-        output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho.T*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
+        match self.simulation_params.regime:
+            case WhichRegime.NEWTONIAN:
+                output[...,ConservativeIndex.DENSITY.value] = rho
+                velocities_squared = np.power(W[...,PrimitiveIndex.X_VELOCITY.value:],2)
+                v_mag_2 = np.sum(velocities_squared, axis=tuple(range(PrimitiveIndex.X_VELOCITY.value, velocities_squared.ndim))).T
+                tau = rho* equation_of_state_primitive(self.simulation_params, pressure, rho)+0.5*rho*v_mag_2
+                output[...,ConservativeIndex.TAU.value] =  tau
+                output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho.T*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
+            case WhichRegime.RELATIVITY:     
+                enthalpy = self.internal_enthalpy_primitive(W)
+                velocities = W[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
+                alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
+                boost = self.metric.boost_field(alpha, velocities, self.grid_info,weight_type)
+                D = rho*boost
+                output[...,ConservativeIndex.DENSITY.value] = D
+                output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
+                output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*enthalpy*np.power(boost,2)*(W[...,PrimitiveIndex.X_VELOCITY.value:].T)).T
+            case _:
+                raise Exception("Unimplemented relativistic regime")
         return output
     
-    def conservative_to_primitive(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        # TODO: Replace this with root finding method to acomodate SR
+    def conservative_to_primitive(self, U_cart_padded: npt.ArrayLike) -> npt.NDArray[np.float64]:
         # Root finder will use NR to calculate pressure
         # Once converged, use equations in Marti et. al to spit out estimated density and velocities
         # Bundle up in primitive variable tensor
-        rho = index_conservative_var(U_cart,ConservativeIndex.DENSITY, self.n_variable_dimensions)
-        assert(np.all(rho!=0))
-        pressure = self.equation_of_state_conservative_newtonian(U_cart)
-        velocities = (U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
-        output = np.zeros(U_cart.shape)
-        output[...,PrimitiveIndex.DENSITY.value] = rho
-        output[..., PrimitiveIndex.X_VELOCITY.value:] = velocities
-        output[...,PrimitiveIndex.PRESSURE.value] =  pressure
-        return output
-
-    def equation_of_state_conservative_newtonian(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        e = np.clip(self.internal_energy_conservative_newtonian(U_cart), a_min=1E-9, a_max=None)
-        assert np.all(e>=0)
-        return (self.simulation_params.gamma-1)*index_conservative_var(U_cart,ConservativeIndex.DENSITY, self.n_variable_dimensions)*e
-
-    def internal_energy_conservative_newtonian(self, U_cart: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        # Relativistic
-        # enthalpy = self.internal_enthalpy_primitive(W)
-        # boost = self.metric.boost_field(W, self.grid_info,weight_type)
-        # D = rho*boost
-        # output[...,ConservativeIndex.DENSITY.value] = D
-        # output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
-        # output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*enthalpy*np.power(boost,2)*(W[...,PrimitiveIndex.X_VELOCITY.value:].T)).T
-        # Non-relativistic
-        rho = index_conservative_var(U_cart,ConservativeIndex.DENSITY, self.n_variable_dimensions)
-        assert(np.all(rho!=0))
-        velocities = (U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
-        velocities_squared = np.power(velocities,2)
-        v_mag_2 = np.sum(velocities_squared, axis=-1).T
-        E = index_conservative_var(U_cart, ConservativeIndex.TAU, self.n_variable_dimensions)
-        output =  E/rho-0.5*v_mag_2   
-        return output
-          
+        # Returns primitive array without any of the ghost cells  since that would require rewriting a bunch of the Metric class stuff that is too much of a pain
+        # NOTE: Make sure that you pad the output appropriately
+         # Remove ghost cells from padded grid
+        slices = [slice(1,-1, None)]*(U_cart_padded.ndim-1)
+        slices += [slice(None)] # Select all of the variables 
+        slices = tuple(slices)
+        U_cart_padded  = U_cart_padded[slices]
+        match self.simulation_params.regime:
+            case WhichRegime.NEWTONIAN:
+                output = np.zeros(U_cart_padded.shape)
+                rho = index_conservative_var(U_cart_padded,ConservativeIndex.DENSITY, self.n_variable_dimensions)
+                assert(np.all(rho!=0))
+                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
+                velocities_squared = np.power(velocities,2)
+                v_mag_2 = np.sum(velocities_squared, axis=-1).T
+                E = index_conservative_var(U_cart_padded, ConservativeIndex.TAU, self.n_variable_dimensions)
+                unclipped_e =  E/rho-0.5*v_mag_2              
+                e = np.clip(unclipped_e, a_min=1E-9, a_max=None)
+                assert np.all(e>=0)
+                pressure  = pressure_from_epsilon(self.simulation_params, e,rho )
+                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
+                output = np.zeros(U_cart_padded.shape)
+                output[...,PrimitiveIndex.DENSITY.value] = rho
+                output[..., PrimitiveIndex.X_VELOCITY.value:] = velocities
+                output[...,PrimitiveIndex.PRESSURE.value] =  pressure
+                return output
+            case WhichRegime.RELATIVITY:
+                args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
+                recovered_pressure = newton(pressure_finding_function, guess,args = args, fprime=pressure_finding_func_der)                
+                return construct_primitives_from_guess(recovered_pressure, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+            case _:
+                raise Exception("Unimplemented relativistic regime")
+        
     def update(self, which_axes : tuple = ()) -> tuple[np.float64, npt.NDArray]:
         # Undo scaling for input
         U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER)
@@ -145,7 +152,7 @@ class SimulationState:
         W = self.conservative_to_primitive(unweighted_U)
         return index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)*index_primitive_var(W,PrimitiveIndex.X_VELOCITY,self.n_variable_dimensions)*np.power(r_center,2)
  
-    def pad_unweighted_array(self, var:npt.ArrayLike):
+    def pad_unweighted_array(self, var:npt.ArrayLike,which_var: WhichVar):
         # Augment the array to incorporate the BCs
         # Input array is Cartesian (unweighted)
         # Returns the padded, Cartesian array 
@@ -167,7 +174,14 @@ class SimulationState:
         pad_width = _as_pairs(pad_width, var.ndim, as_index=True)
 
         padded = np.pad(var, pad_width)
-        assert(self.U_initial_unweighted_padded.shape == padded.shape)
+        match which_var:
+            case WhichVar.CONSERVATIVE:
+                assert(self.U_initial_unweighted_padded.shape == padded.shape)
+            case WhichVar.PRIMITIVE:
+                assert(self.W_initial_unweighted_padded.shape == padded.shape)
+            case _:
+                raise Exception("Unimplemented variable type")
+
         # And apply along each axis
 
         for axis in range(0,padded.ndim):
@@ -176,7 +190,14 @@ class SimulationState:
 
             # view with the iteration axis at the end
             view = np.moveaxis(padded, axis, -1)
-            initial_view = np.moveaxis(self.U_initial_unweighted_padded,axis, -1)
+            match which_var:
+                case WhichVar.CONSERVATIVE:
+                    initial_view = np.moveaxis(self.U_initial_unweighted_padded,axis, -1)
+                case WhichVar.PRIMITIVE:
+                    initial_view = np.moveaxis(self.W_initial_unweighted_padded,axis, -1)
+                case _:
+                    raise Exception("Unimplemented variable type")
+
 
             # compute indices for the iteration axes, and append a trailing
             # ellipsis to prevent 0d arrays decaying to scalars (gh-8642)
@@ -193,8 +214,10 @@ class SimulationState:
         # Returns the time step needed, the change in the conservative variables, and the recovered primitives of the system prior to stepping
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
-                U_padded_cart = self.pad_unweighted_array(U_cart)
-                W_padded_cart = self.conservative_to_primitive(U_padded_cart)
+                U_padded_cart = self.pad_unweighted_array(U_cart, WhichVar.CONSERVATIVE)
+                W_cart = self.conservative_to_primitive(U_padded_cart)
+                W_padded_cart = self.pad_unweighted_array(W_cart, WhichVar.PRIMITIVE)
+                assert(W_padded_cart.shape == U_padded_cart.shape)
                 possible_dt = []
                 state_update = np.zeros(U_cart.shape)
                 if(len(which_axis)==0):
@@ -329,7 +352,9 @@ class SimulationState:
         four_velocities  = np.zeros (four_vel_shape)
         four_velocities[...,1:]  = velocities # spatial components
         four_velocities[...,0] = 1 # 0th component
-        boost = self.metric.boost_field(W_cart_unpadded, self.grid_info,WeightType.CENTER)
+        velocities = W_cart_unpadded[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
+        alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
+        boost = self.metric.boost_field(alpha, velocities, self.grid_info,WeightType.CENTER)
         four_velocities = (boost.T*four_velocities.T).T
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum

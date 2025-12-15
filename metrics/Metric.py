@@ -212,10 +212,8 @@ class Metric(ABC):
         right = np.matvec(spatial_metric, velocities) # Sum over last index. Size is (gridsize, dim)
         return  np.vecdot(velocities, right)
     
-    def boost_field(self, W:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType):
-        velocities = W[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
-        alpha =  self.get_metric_product(velocities, grid_info, WhichCacheTensor.ALPHA,  weight_type).array
-        return alpha*np.power(1-self.spatial_vel_mag(W, grid_info, weight_type,alpha), -0.5)
+    def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType):
+        return alpha.array*np.power(1-self.spatial_vel_mag(velocities, grid_info, weight_type), -0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType, use_cache =True) -> cached_array:
         if(use_cache):

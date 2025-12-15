@@ -6,7 +6,7 @@ from HydroCore import PrimitiveIndex, SimulationState
 from GridInfo import WeightType
 from metrics import Metric
 from GuessPrimitives import sound_speed
-from HelperFunctions import index_primitive_var
+from HelperFunctions import index_primitive_var, WhichVar
 
 def plot_results_1D(
     input_pkl_file: str = "snapshot.pkl",
@@ -35,7 +35,8 @@ def plot_results_1D(
     t, U = history[which_slice]
     sim_state.U = U
     U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER)
-    W = sim_state.conservative_to_primitive(U_cart)
+    U_cart_padded = sim_state.pad_unweighted_array(U_cart, WhichVar.CONSERVATIVE)
+    W = sim_state.conservative_to_primitive(U_cart_padded)
 
     rho = index_primitive_var( W,PrimitiveIndex.DENSITY,sim_state.n_variable_dimensions).flatten()
     v = index_primitive_var( W,PrimitiveIndex.X_VELOCITY,sim_state.n_variable_dimensions).flatten()

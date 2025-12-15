@@ -10,6 +10,7 @@ import Plotting
 from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
 from metrics.SphericalMinkowski_1_3 import SphericalnMinkowski_1_3
 from metrics.CartesianMinkowski_1_2 import CartesianMinkowski_1_2
+from HelperFunctions import WhichRegime
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
@@ -23,11 +24,13 @@ def save_results(
 def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                            rho_r:np.float64, v_r: np.float64, P_r:np.float64,
                            N_cells: np.int64 = 10000,
-                           t_max: np.float64 = 0.2) -> SimulationState:
+                           t_max: np.float64 = 0.2,
+                            relativistic: WhichRegime = WhichRegime.NEWTONIAN) -> SimulationState:
     grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
     simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
-                                  include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
+                                  include_source=False, time_integration=TimeUpdateType.RK3,
+                                    spatial_integration=spatial_update, regime=relativistic)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
@@ -77,6 +80,7 @@ class Which1DTestProblem(Enum):
     CARTESIAN_SOD=0 
     HARDER_SOD=1 
     BONDI_PROBLEM=2
+    SR_CARTESIAN_SOD=3
 
 def runSim1D(which_sim: Which1DTestProblem):
     match which_sim:
@@ -84,8 +88,12 @@ def runSim1D(which_sim: Which1DTestProblem):
             save_frequency = 1
             which_axes = ()
             state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, N_cells=1000, t_max=0.2) 
+        case Which1DTestProblem.SR_CARTESIAN_SOD:
+            save_frequency = 1
+            which_axes = ()
+            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125,
+                                                 N_cells=1000, t_max=0.2, relativistic=WhichRegime.RELATIVITY) 
         case Which1DTestProblem.HARDER_SOD:
-            state_sim = SodShockInitialization(10.0,0.0,100.0, 1.0, 0.0, 1.0, N_cells=1000, t_max=0.1)
             save_frequency = 100
             which_axes = ()
         case Which1DTestProblem.BONDI_PROBLEM:
@@ -104,11 +112,12 @@ def runSim1D(which_sim: Which1DTestProblem):
         print(t, state_sim.simulation_params.t_max)
     save_results(history, state_sim)
 
-def ImplosionInitialization(t_max = 2.5, N_cells = 100):
+def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEWTONIAN):
     grid_info = GridInfo(np.array([0.0,0.0]), np.array([0.3,0.3]), np.array([N_cells,N_cells]))
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
     simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
-                                  include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update)
+                                  include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update,
+                                  regime=regime)
     bcm = BoundaryConditionManager(
             [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD], 
             [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD]
@@ -133,11 +142,15 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100):
 
 class Which2DTestProblem:
     IMPLOSION_TEST=0
+    SR_IMPLOSION_TEST=1
 
 def runSim2D(which_sim: Which2DTestProblem):
     match which_sim:
         case Which2DTestProblem.IMPLOSION_TEST:
             state_sim = ImplosionInitialization(t_max=3)            
+            save_frequency = 1
+        case Which2DTestProblem.SR_IMPLOSION_TEST:
+            state_sim = ImplosionInitialization(t_max=3, regime=WhichRegime.RELATIVITY)            
             save_frequency = 1
         case _:
             raise Exception("Unimplemented test problem")
@@ -153,11 +166,13 @@ def runSim2D(which_sim: Which2DTestProblem):
 
 if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
-    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
 #   runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
-    # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-    # Plotting.plot_2D_anim()
+    runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
+    Plotting.plot_2D_anim()

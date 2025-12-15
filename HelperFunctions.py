@@ -9,6 +9,11 @@ class WhichRegime(Enum):
     NEWTONIAN = 0
     RELATIVITY = 1
 
+class WhichVar(Enum):
+    PRIMITIVE  =0
+    CONSERVATIVE   =1
+
+
 # NOTE: Is there a confusion between internal energy and internal enthalpy usage?
 class PrimitiveIndex(Enum):
     DENSITY = 0
@@ -33,6 +38,7 @@ class SimParams:
     include_source: bool
     time_integration: TimeUpdateType 
     spatial_integration: SpatialUpdate
+    regime: WhichRegime 
 
 ## Padding helpers
 
