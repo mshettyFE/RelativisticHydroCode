@@ -315,7 +315,7 @@ class SimulationState:
         cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_minus_half].T
         # cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:,...]
         # cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
-        return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta()[spatial_index], alpha_plus, alpha_minus
+        return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta(spatial_index)[spatial_index], alpha_plus, alpha_minus
 
     def alpha_plus_minus(self, primitives: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         pressure = index_primitive_var(primitives, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
@@ -403,7 +403,8 @@ class SimulationState:
 
     def calc_dt(self, alpha_plus: npt.ArrayLike, alpha_minus:npt.ArrayLike):
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
-        return self.simulation_params.Courant*np.min(self.grid_info.delta())/max_alpha
+        min_delta = np.min([self.grid_info.delta(i) for i in range(self.n_variable_dimensions)])
+        return self.simulation_params.Courant*min_delta/max_alpha
 
 # def minmod(x: npt.ArrayLike, y: npt.ArrayLike, z: npt.ArrayLike):
 #     sgn_x = np.sign(x)

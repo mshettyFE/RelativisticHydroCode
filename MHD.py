@@ -4,7 +4,7 @@ import numpy.typing as npt
 import pickle as pkl
 from HydroCore import PrimitiveIndex, SimParams, SimulationState
 from UpdateSteps import SpatialUpdateType, SpatialUpdate,TimeUpdateType
-from  GridInfo import GridInfo
+from  GridInfo import GridInfo, Scaling
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
 from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
@@ -26,7 +26,7 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                            N_cells: np.int64 = 10000,
                            t_max: np.float64 = 0.2,
                             relativistic: WhichRegime = WhichRegime.NEWTONIAN) -> SimulationState:
-    grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]))
+    grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]), scalings=[Scaling.LINEAR])
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
     simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
                                   include_source=False, time_integration=TimeUpdateType.RK3,
@@ -57,7 +57,7 @@ def BondiAccretionInitialization(
         N_cells: np.float64,
         t_max: np.float64 = 5
     ):
-    grid_info = GridInfo(np.array([0.5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]))
+    grid_info = GridInfo(np.array([0.5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]), scalings=[Scaling.LINEAR])
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
     simulation_params = SimParams(1.4, 0.2, t_max,1.0,  
                                   include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
@@ -113,7 +113,7 @@ def runSim1D(which_sim: Which1DTestProblem):
     save_results(history, state_sim)
 
 def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEWTONIAN):
-    grid_info = GridInfo(np.array([0.0,0.0]), np.array([0.3,0.3]), np.array([N_cells,N_cells]))
+    grid_info = GridInfo(np.array([0.0,0.0]), np.array([0.3,0.3]), np.array([N_cells,N_cells]), scalings=[Scaling.LINEAR, Scaling.LINEAR])
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
     simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
                                   include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update,
