@@ -117,10 +117,15 @@ class SimulationState:
                 return output
             case WhichRegime.RELATIVITY:
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
-                guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
-                recovered_pressure = newton(pressure_finding_function, guess,args = args, fprime=pressure_finding_func_der, maxiter=50) 
-                print("Rocovered", np.sum(pressure_finding_function(recovered_pressure, *args))   )            
-                return construct_primitives_from_guess(recovered_pressure, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                square_root_guess = np.power(index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions),0.5)
+                recovered_pressure_root = newton(pressure_finding_function, square_root_guess,args = args, fprime=pressure_finding_func_der, maxiter=100) 
+#                recovered_pressure_root = newton(pressure_finding_function, square_root_guess,args = args,  maxiter=1000) 
+                # print("Guess",guess,"Recover", recovered_pressure)
+                assert((recovered_pressure_root>=0).all())
+                out = construct_primitives_from_guess(recovered_pressure_root, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                assert((index_primitive_var(out, PrimitiveIndex.DENSITY, self.n_variable_dimensions)>0).all())
+#                print("Rocovered", np.sum(pressure_finding_function(recovered_pressure, *args))   )            
+                return out
             case _:
                 raise Exception("Unimplemented relativistic regime")
         
@@ -129,6 +134,7 @@ class SimulationState:
         U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER, self.simulation_params)
         dt, state_update_1, primitives = self.LinearUpdate(U_cartesian, which_axes)
         U_1 = self.U+dt*state_update_1
+        assert((index_primitive_var(primitives, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)>=0).all())
         self.primitive_previous = primitives
         match self.simulation_params.time_integration:
             case TimeUpdateType.EULER:

@@ -203,22 +203,20 @@ class Metric(ABC):
         weights = self.cell_weights(grid_info, weight_type, sim_params)
         return (U.T/weights.T).T
     
-    def spatial_vel_mag(self, velocities:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+    def spatial_vel_mag(self, velocities:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams,         epsilon = 1E-3):
         # W is a ([ncells]*ndim,prim) where the prim denotes (\rho, P, and  up to 3 velocities)
         metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
-        spatial_metric = np.einsum("ij...->...ij",metric[index]) # Size of (dim,dim, gridsize)
+        spatial_metric = np.einsum("ij...->...ij",metric[index]) 
         right = np.matvec(spatial_metric, velocities) # Sum over last index. Size is (gridsize, dim)
-        return  np.vecdot(velocities, right)
+        output = np.vecdot(velocities, right)
+#        return output
+        return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
     
     def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         v2_mag  = self.spatial_vel_mag(velocities, grid_info, weight_type, sim_params)
-        # if(not (v2_mag<1).all()):
-        #    print(v2_mag)
-        #    print(v2_mag.shape)
-        #    assert(1==0)
         return alpha.array*np.power(1-v2_mag, -0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
