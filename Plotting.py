@@ -22,7 +22,7 @@ def plot_results_1D(
 # I also cleaned up extraneous variables and the like
     with open(input_pkl_file, 'rb') as f:
         history, sim_state = pkl.load(f)
-    sim_state.metric.sanity_check(sim_state.grid_info)
+    sim_state.metric.sanity_check(sim_state.grid_info, sim_state.simulation_params)
     N = history[0][1].shape[0]
     support = sim_state.grid_info.construct_grid_centers(0)
     assert(N==support.shape[0])
@@ -34,7 +34,7 @@ def plot_results_1D(
 
     t, U = history[which_slice]
     sim_state.U = U
-    U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER)
+    U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER, sim_state.simulation_params)
     U_cart_padded = sim_state.pad_unweighted_array(U_cart, WhichVar.CONSERVATIVE)
     W = sim_state.conservative_to_primitive(U_cart_padded)
 

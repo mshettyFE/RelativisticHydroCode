@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import numpy.typing as npt
 from GridInfo import WeightType, GridInfo
 from enum import Enum
+from HelperFunctions import SimParams
 from typing import Tuple, List
 
 class WhichCacheTensor(Enum):
@@ -41,7 +42,7 @@ class Metric(ABC):
 
     # Call this at the end of the constructor of the subclass to make sure that your metric conforms
     # Should also fill all of the caches (Assuming I didn't miss one)
-    def sanity_check(self, grid_info: GridInfo) ->  bool:
+    def sanity_check(self, grid_info: GridInfo, sim_params: SimParams) ->  bool:
         assert(self.dimension != None)
         assert(self.dimension >=2) # Need at least 1+1 formulation
         cases = [
@@ -59,9 +60,9 @@ class Metric(ABC):
 
         # Fill up the caches
         for item in cases:
-            self.get_metric_product(grid_info, item[0], item[1], use_cache=False)
+            self.get_metric_product(grid_info, item[0], item[1], sim_params, use_cache=False)
         # Lorentzian manifolds should have negative determinant everywhere, right?
-        det = self.get_metric_product(grid_info, WhichCacheTensor.DETERMINANT, WeightType.CENTER, use_cache=True).array
+        det = self.get_metric_product(grid_info, WhichCacheTensor.DETERMINANT, WeightType.CENTER,  sim_params, use_cache=True).array
         assert(np.all( det<=0 ))
 
     def verify_meshgrid(self, mesh_grid:Tuple[npt.NDArray[np.float64],...]) ->  bool:
@@ -191,20 +192,20 @@ class Metric(ABC):
             case _:
                 return ("Invalid weight type", False)
 
-    def cell_weights(self, grid_info:GridInfo, weight_type: WeightType):
-        return np.sqrt(-(self.get_metric_product( grid_info, WhichCacheTensor.DETERMINANT,weight_type=weight_type, use_cache=True).array))
+    def cell_weights(self, grid_info:GridInfo, weight_type: WeightType, sim_params: SimParams):
+        return np.sqrt(-(self.get_metric_product( grid_info, WhichCacheTensor.DETERMINANT,weight_type, sim_params, use_cache=True).array))
 
-    def weight_system(self, U_cart: npt.ArrayLike, grid_info: GridInfo, weight_type: WeightType):
-        weights = self.cell_weights(grid_info, weight_type)
+    def weight_system(self, U_cart: npt.ArrayLike, grid_info: GridInfo, weight_type: WeightType, sim_params: SimParams):
+        weights = self.cell_weights(grid_info, weight_type, sim_params)
         return (weights.T * U_cart.T).T
     
-    def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType):
-        weights = self.cell_weights(grid_info, weight_type)
+    def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType, sim_params: SimParams):
+        weights = self.cell_weights(grid_info, weight_type, sim_params)
         return (U.T/weights.T).T
     
-    def spatial_vel_mag(self, velocities:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType):
+    def spatial_vel_mag(self, velocities:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         # W is a ([ncells]*ndim,prim) where the prim denotes (\rho, P, and  up to 3 velocities)
-        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type).array
+        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
@@ -212,10 +213,10 @@ class Metric(ABC):
         right = np.matvec(spatial_metric, velocities) # Sum over last index. Size is (gridsize, dim)
         return  np.vecdot(velocities, right)
     
-    def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType):
-        return alpha.array*np.power(1-self.spatial_vel_mag(velocities, grid_info, weight_type), -0.5)
+    def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+        return alpha.array*np.power(1-self.spatial_vel_mag(velocities, grid_info, weight_type, sim_params), -0.5)
     
-    def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType, use_cache =True) -> cached_array:
+    def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
         if(use_cache):
             output, success = self.retrieve_cache(weight_type, which_cache)
             if (success==False):
@@ -232,19 +233,19 @@ class Metric(ABC):
         product = None
         match which_cache:
             case WhichCacheTensor.METRIC:
-                product = self.metric(mesh_grid,expected_product_size)
+                product = self.metric(mesh_grid,expected_product_size,sim_params)
             case WhichCacheTensor.INVERSE_METRIC:
-                product = self.inv_metric(mesh_grid,expected_product_size)
+                product = self.inv_metric(mesh_grid,expected_product_size,sim_params)
             case WhichCacheTensor.DETERMINANT:
-                product = self.determinant(mesh_grid, expected_product_size)
+                product = self.determinant(mesh_grid, expected_product_size,sim_params)
             case WhichCacheTensor.PARTIAL_DER:
-                product = self.partial_derivative(mesh_grid, expected_product_size)
+                product = self.partial_derivative(mesh_grid, expected_product_size,sim_params)
             case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                product = self.Christoffel_upper(mesh_grid, expected_product_size)
+                product = self.Christoffel_upper(mesh_grid, expected_product_size,sim_params)
             case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                product = self.partial_ln_alpha(mesh_grid, expected_product_size)
+                product = self.partial_ln_alpha(mesh_grid, expected_product_size,sim_params)
             case WhichCacheTensor.ALPHA:
-                product = self.alpha(mesh_grid, expected_product_size)
+                product = self.alpha(mesh_grid, expected_product_size,sim_params)
             case _:
                 product  = None
         if(product is None):
@@ -256,25 +257,25 @@ class Metric(ABC):
         return final
 
     @abstractmethod
-    def metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...]) ->  npt.NDArray[np.float64]:
+    def metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams) ->  npt.NDArray[np.float64]:
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.zeros(expected_product_size)
         return output 
     
     @abstractmethod
-    def inv_metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...]) ->  npt.NDArray[np.float64]:
+    def inv_metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams) ->  npt.NDArray[np.float64]:
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.zeros(expected_product_size)
         return output 
 
     @abstractmethod
-    def determinant(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) -> npt.NDArray[np.float64]:
+    def determinant(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams ) -> npt.NDArray[np.float64]:
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.zeros(expected_product_size)
         return output 
     
     @abstractmethod
-    def partial_derivative(self, mesh_grid: Tuple[npt.NDArray[np.float64],...] , expected_product_size: Tuple[int,...]) ->  npt.NDArray[np.float64]:
+    def partial_derivative(self, mesh_grid: Tuple[npt.NDArray[np.float64],...] , expected_product_size: Tuple[int,...], sim_params: SimParams) ->  npt.NDArray[np.float64]:
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.zeros(expected_product_size)
@@ -282,14 +283,14 @@ class Metric(ABC):
 
 
     @abstractmethod
-    def Christoffel_upper(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
+    def Christoffel_upper(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] , sim_params: SimParams) ->  npt.NDArray[np.float64]:
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.zeros(expected_product_size)
         return output 
     
     @abstractmethod
-    def partial_ln_alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
+    def partial_ln_alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] , sim_params: SimParams) ->  npt.NDArray[np.float64]:
         # Fix upper index to 0 since that's the only one that's relevant for this problem
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size
@@ -297,7 +298,7 @@ class Metric(ABC):
         return output 
     
     @abstractmethod
-    def alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...] ) ->  npt.NDArray[np.float64]:
+    def alpha(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams ) ->  npt.NDArray[np.float64]:
         # Fix upper index to 0 since that's the only one that's relevant for this problem
         ## NOTE : Will only deal with time independent metrics. Hence time derivatives are automatically 0
         # Use self.expected_tensor_dimension() to generate expected_product_size

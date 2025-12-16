@@ -43,7 +43,7 @@ class SimulationState:
         self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
         self.W_initial_unweighted_padded = np.pad(primitive_tensor, pad_width, initial_value_boundary_padding) 
         assert(self.W_initial_unweighted_padded.shape == self.U_initial_unweighted_padded.shape)
-        self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER)
+        self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER, self.simulation_params)
         self.current_time = starting_time
         # Purely spatial dirac delta field for flux tensor calculation
         spatial_dims = [self.n_variable_dimensions]*2+[*self.U_initial_unweighted_padded[...,0].shape]
@@ -73,8 +73,8 @@ class SimulationState:
             case WhichRegime.RELATIVITY:     
                 enthalpy = self.internal_enthalpy_primitive(W)
                 velocities = W[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
-                alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
-                boost = self.metric.boost_field(alpha, velocities, self.grid_info,weight_type)
+                alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
+                boost = self.metric.boost_field(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
                 D = rho*boost
                 output[...,ConservativeIndex.DENSITY.value] = D
                 output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
@@ -123,7 +123,7 @@ class SimulationState:
         
     def update(self, which_axes : tuple = ()) -> tuple[np.float64, npt.NDArray]:
         # Undo scaling for input
-        U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER)
+        U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER, self.simulation_params)
         dt, state_update_1, primitives = self.LinearUpdate(U_cartesian, which_axes)
         U_1 = self.U+dt*state_update_1
         self.primitive_previous = primitives
@@ -132,11 +132,11 @@ class SimulationState:
                 self.current_time  += dt
                 self.U = U_1
             case TimeUpdateType.RK3:
-                U_scaled_1 = self.metric.unweight_system(U_1, self.grid_info, WeightType.CENTER)
+                U_scaled_1 = self.metric.unweight_system(U_1, self.grid_info, WeightType.CENTER, self.simulation_params)
                 _, state_update_2, primitives = self.LinearUpdate(U_scaled_1, which_axes)
                 self.primitive_previous = primitives
                 U_2 = (3/4)*self.U+(1/4)*U_1+(1/4)*dt*state_update_2 
-                U_scaled_2 = self.metric.unweight_system(U_2, self.grid_info, WeightType.CENTER)
+                U_scaled_2 = self.metric.unweight_system(U_2, self.grid_info, WeightType.CENTER, self.simulation_params)
                 _, state_update_3, primitives = self.LinearUpdate(U_scaled_2, which_axes)
                 self.primitive_previous = primitives
                 self.U = (1/3)*self.U+(2/3)*U_2+(2/3)*dt*state_update_3
@@ -148,7 +148,7 @@ class SimulationState:
 
     def M_dot(self):
         r_center = self.grid_info.construct_grid_centers(0) 
-        unweighted_U = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER)
+        unweighted_U = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER, self.simulation_params)
         W = self.conservative_to_primitive(unweighted_U)
         return index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)*index_primitive_var(W,PrimitiveIndex.X_VELOCITY,self.n_variable_dimensions)*np.power(r_center,2)
  
@@ -240,7 +240,7 @@ class SimulationState:
                 primitives = W_padded_cart[slices]
                 if(self.simulation_params.include_source):
                     source_term = self.SourceTerm(primitives) 
-                    state_update += self.metric.weight_system(source_term, self.grid_info, WeightType.CENTER)
+                    state_update += self.metric.weight_system(source_term, self.grid_info, WeightType.CENTER, self.simulation_params)
                 return dt, state_update, primitives
             case _:
                 raise Exception("Unimplemented Spatial Update")
@@ -306,7 +306,7 @@ class SimulationState:
                                -alpha_prod.T*(right_conserve_plus -left_conserve_plus))/alpha_sum.T
         cell_flux_minus_half = (alpha_plus.T*left_cell_flux_minus+ alpha_minus.T*right_cell_flux_minus
                                 -alpha_prod.T*(right_conserve_minus-left_conserve_minus))/alpha_sum.T
-        weights = self.metric.cell_weights(self.grid_info, WeightType.EDGE) 
+        weights = self.metric.cell_weights(self.grid_info, WeightType.EDGE, self.simulation_params) 
         slices_plus_half = [slice(1,None, None)]*weights.ndim
         slices_plus_half = tuple(slices_plus_half)
         slices_minus_half = [slice(None,-1, None)]*weights.ndim
@@ -343,7 +343,7 @@ class SimulationState:
     
     def StressEnergyTensor(self,W_cart_unpadded:npt.ArrayLike):
         # TODO: Change 4 vector to include normalization factor (Did for SR, need to generalize to GR)
-        metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, use_cache=True).array
+        metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
         rho  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
         pressure  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
         velocities = W_cart_unpadded[...,2:]
@@ -353,8 +353,8 @@ class SimulationState:
         four_velocities[...,1:]  = velocities # spatial components
         four_velocities[...,0] = 1 # 0th component
         velocities = W_cart_unpadded[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
-        alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
-        boost = self.metric.boost_field(alpha, velocities, self.grid_info,WeightType.CENTER)
+        alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
+        boost = self.metric.boost_field(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
         four_velocities = (boost.T*four_velocities.T).T
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
@@ -380,11 +380,11 @@ class SimulationState:
         # output[..., 4]  = 0 
         # return output
         T_mu_nu_raised = self.StressEnergyTensor(W)
-        metric: Metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC,  WeightType.CENTER).array
-        partial_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_DER,  WeightType.CENTER).array
-        partial_ln_alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_LN_ALPHA,  WeightType.CENTER).array
-        alpha =self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA,  WeightType.CENTER).array
-        Christoffel_upper = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.CHRISTOFFEL_UPPER0,  WeightType.CENTER).array
+        metric: Metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC,  WeightType.CENTER, self.simulation_params).array
+        partial_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_DER,  WeightType.CENTER, self.simulation_params).array
+        partial_ln_alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_LN_ALPHA,  WeightType.CENTER, self.simulation_params).array
+        alpha =self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array
+        Christoffel_upper = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.CHRISTOFFEL_UPPER0,  WeightType.CENTER, self.simulation_params).array
         rho_source = np.zeros(alpha.shape)
         tau_first = np.einsum("ij...,i...->j...", T_mu_nu_raised, partial_ln_alpha)[METRIC_VARIABLE_INDEX.TIME.value,...]
         tau_second = np.einsum("ij...,kji...->k...", T_mu_nu_raised, Christoffel_upper)[METRIC_VARIABLE_INDEX.TIME.value,...]

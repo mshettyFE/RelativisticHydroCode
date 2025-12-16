@@ -35,7 +35,7 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
     grid_shape = grid_info.NCells
     primitives = np.zeros( list(grid_shape)+[3]  ) 
     assert(primitives.ndim==2)
-    metric = CartesianMinkowski_1_1(grid_info)
+    metric = CartesianMinkowski_1_1(grid_info, simulation_params)
     assert(metric.dimension==2) # 1+1 
     grid_centers = grid_info.construct_grid_centers(0)
     lower_half = grid_centers<0.5 
@@ -71,7 +71,7 @@ def BondiAccretionInitialization(
     primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0 # theta
     primitives[..., PrimitiveIndex.Z_VELOCITY.value] = 0 # phi
     primitives[..., PrimitiveIndex.PRESSURE.value] = P
-    metric = SphericalnMinkowski_1_3(grid_info)
+    metric = SphericalnMinkowski_1_3(grid_info, simulation_params)
     out = SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     )
@@ -134,7 +134,7 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEW
     primitives[lower, PrimitiveIndex.PRESSURE.value] = 0.125
     primitives[upper, PrimitiveIndex.DENSITY.value] = 1.0
     primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
-    metric = CartesianMinkowski_1_2(grid_info)
+    metric = CartesianMinkowski_1_2(grid_info, simulation_params)
     assert(metric.dimension==3) # 1+2 
     return SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
@@ -166,13 +166,13 @@ def runSim2D(which_sim: Which2DTestProblem):
 
 if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
-    # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    # Plotting.plot_results_1D()
-    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
-    # Plotting.plot_results_1D()
+    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+    Plotting.plot_results_1D()
+    runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
 #   runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
-    runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
-    Plotting.plot_2D_anim()
+    # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
+    # Plotting.plot_2D_anim()

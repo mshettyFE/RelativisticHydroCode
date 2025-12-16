@@ -14,8 +14,8 @@ def pressure_finding_function(guess_pressure: npt.ArrayLike,
                                 n_spatial_dim: int) -> npt.NDArray:
     # Implements p(\rho(\bar{p}))
     vels = velocity_guess(guess_pressure, U_cart, n_spatial_dim)
-    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
-    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER)
+    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, sim_params) 
+    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER, sim_params)
     D = index_conservative_var(U_cart,ConservativeIndex.DENSITY, n_spatial_dim)    
     rho = density_guess(D, boost)
     epsilon = internal_energy_guess(guess_pressure, U_cart, boost, n_spatial_dim)
@@ -29,9 +29,9 @@ def pressure_finding_func_der(guess_pressure,
                                 n_spatial_dim: int) -> npt.NDArray:
     # Implements f'(p) = |v(p)|^{2} c_{s}^{2}-1
     vels = velocity_guess(guess_pressure, U_cart, n_spatial_dim)
-    vel_magnitude = metric.spatial_vel_mag(vels, grid_info, WeightType.CENTER)
-    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
-    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER) # NOTE: implicit Duplicate |v|^{2} 
+    vel_magnitude = metric.spatial_vel_mag(vels, grid_info, WeightType.CENTER, sim_params)
+    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, sim_params) 
+    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER, sim_params) # NOTE: implicit Duplicate |v|^{2} 
     D = index_conservative_var(U_cart,ConservativeIndex.DENSITY, n_spatial_dim)    
     rho = density_guess(D, boost)
     speed_sound = sound_speed(sim_params, guess_pressure, rho)
@@ -62,8 +62,8 @@ def construct_primitives_from_guess(guess_pressure:npt.ArrayLike,
                                      grid_info: GridInfo,
                                 n_spatial_dim: int) -> npt.NDArray:
     vels = velocity_guess(guess_pressure, U_cart, n_spatial_dim)
-    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER) 
-    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER)    
+    alpha  = metric.get_metric_product(grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, sim_params) 
+    boost =     metric.boost_field(alpha, vels, grid_info , WeightType.CENTER, sim_params)    
     D = index_conservative_var(U_cart,ConservativeIndex.DENSITY, n_spatial_dim)
     rho = density_guess(D, boost)
     output = np.zeros(U_cart.shape)
