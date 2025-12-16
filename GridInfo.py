@@ -52,7 +52,7 @@ class GridInfo:
             case Scaling.LINEAR:
                 return np.linspace(self.leftmost_edges[index], self.rightmost_edges[index], self.NCells[index]+1 )
             case Scaling.LOG10:
-                return np.log10(self.leftmost_edges[index], self.rightmost_edges[index], self.NCells[index]+1 )
+                return np.logspace(self.leftmost_edges[index], self.rightmost_edges[index], self.NCells[index]+1 )
             case _:
                 raise Exception("Unimplemented scaling")
     

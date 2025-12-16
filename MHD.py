@@ -8,7 +8,7 @@ from  GridInfo import GridInfo, Scaling
 from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 import Plotting
 from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
-from metrics.SphericalMinkowski_1_3 import SphericalnMinkowski_1_3
+from metrics.LinearGravity_1_3 import LinearGravity_1_3
 from metrics.CartesianMinkowski_1_2 import CartesianMinkowski_1_2
 from HelperFunctions import WhichRegime
 
@@ -57,10 +57,10 @@ def BondiAccretionInitialization(
         N_cells: np.float64,
         t_max: np.float64 = 5
     ):
-    grid_info = GridInfo(np.array([0.5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]), scalings=[Scaling.LINEAR])
+    grid_info = GridInfo(np.array([5,np.pi/2,0]), np.array([10.15,np.pi/2,0]), np.array([N_cells,1,1]), scalings=[Scaling.LINEAR,Scaling.LINEAR,Scaling.LINEAR])
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {"theta": 1.5})
     simulation_params = SimParams(1.4, 0.2, t_max,1.0,  
-                                  include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update) 
+                                  include_source=True, time_integration=TimeUpdateType.EULER  , spatial_integration=spatial_update, regime=WhichRegime.RELATIVITY) 
     bcm = BoundaryConditionManager(
         [BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD]
         )
@@ -71,7 +71,7 @@ def BondiAccretionInitialization(
     primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0 # theta
     primitives[..., PrimitiveIndex.Z_VELOCITY.value] = 0 # phi
     primitives[..., PrimitiveIndex.PRESSURE.value] = P
-    metric = SphericalnMinkowski_1_3(grid_info, simulation_params)
+    metric = LinearGravity_1_3(grid_info, simulation_params)
     out = SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     )
@@ -166,13 +166,13 @@ def runSim2D(which_sim: Which2DTestProblem):
 
 if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
-    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    Plotting.plot_results_1D()
-    runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
-    Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
-#   runSim1D(Which1DTestProblem.BONDI_PROBLEM)
-    # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
+    runSim1D(Which1DTestProblem.BONDI_PROBLEM)
+    Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
     # Plotting.plot_2D_anim()

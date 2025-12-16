@@ -78,7 +78,9 @@ class SimulationState:
                 D = rho*boost
                 output[...,ConservativeIndex.DENSITY.value] = D
                 output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
-                output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho*enthalpy*np.power(boost,2)*(W[...,PrimitiveIndex.X_VELOCITY.value:].T)).T
+                first = rho*enthalpy*np.power(boost,2)
+                secon = (W[...,PrimitiveIndex.X_VELOCITY.value:].T)
+                output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] =(first.T *secon).T
             case _:
                 raise Exception("Unimplemented relativistic regime")
         return output
@@ -116,7 +118,8 @@ class SimulationState:
             case WhichRegime.RELATIVITY:
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
                 guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
-                recovered_pressure = newton(pressure_finding_function, guess,args = args, fprime=pressure_finding_func_der)                
+                recovered_pressure = newton(pressure_finding_function, guess,args = args, fprime=pressure_finding_func_der, maxiter=50) 
+                print("Rocovered", np.sum(pressure_finding_function(recovered_pressure, *args))   )            
                 return construct_primitives_from_guess(recovered_pressure, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
             case _:
                 raise Exception("Unimplemented relativistic regime")
@@ -403,7 +406,8 @@ class SimulationState:
 
     def calc_dt(self, alpha_plus: npt.ArrayLike, alpha_minus:npt.ArrayLike):
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
-        min_delta = np.min([self.grid_info.delta(i) for i in range(self.n_variable_dimensions)])
+        deltas = np.asarray([np.min(self.grid_info.delta(i)) for i in range(self.n_variable_dimensions)])
+        min_delta = np.min(deltas[deltas>0])
         return self.simulation_params.Courant*min_delta/max_alpha
 
 # def minmod(x: npt.ArrayLike, y: npt.ArrayLike, z: npt.ArrayLike):

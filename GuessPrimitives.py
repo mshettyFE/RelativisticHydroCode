@@ -19,7 +19,8 @@ def pressure_finding_function(guess_pressure: npt.ArrayLike,
     D = index_conservative_var(U_cart,ConservativeIndex.DENSITY, n_spatial_dim)    
     rho = density_guess(D, boost)
     epsilon = internal_energy_guess(guess_pressure, U_cart, boost, n_spatial_dim)
-    return pressure_from_epsilon(sim_params, epsilon, rho)-guess_pressure
+    out = pressure_from_epsilon(sim_params, epsilon, rho)-guess_pressure
+    return out
 
 def pressure_finding_func_der(guess_pressure, 
                                U_cart: npt.ArrayLike, 
@@ -44,7 +45,7 @@ def velocity_guess(guess_pressure: npt.ArrayLike, U_cart: npt.ArrayLike,
     tau = index_conservative_var(U_cart,ConservativeIndex.TAU, n_spatial_dim)
     D = index_conservative_var(U_cart,ConservativeIndex.DENSITY, n_spatial_dim)
     assert(tau.shape==guess_pressure.shape)
-    return (momenta.T/(tau+D+guess_pressure)).T
+    return (momenta.T/(tau+D+guess_pressure).T).T
 
 def internal_energy_guess(guess_pressure: npt.ArrayLike, U_cart: npt.ArrayLike,
                           boost: npt.ArrayLike, n_spatial_dim: int) -> npt.NDArray:

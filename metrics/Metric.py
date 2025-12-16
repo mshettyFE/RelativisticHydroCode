@@ -214,7 +214,12 @@ class Metric(ABC):
         return  np.vecdot(velocities, right)
     
     def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
-        return alpha.array*np.power(1-self.spatial_vel_mag(velocities, grid_info, weight_type, sim_params), -0.5)
+        v2_mag  = self.spatial_vel_mag(velocities, grid_info, weight_type, sim_params)
+        # if(not (v2_mag<1).all()):
+        #    print(v2_mag)
+        #    print(v2_mag.shape)
+        #    assert(1==0)
+        return alpha.array*np.power(1-v2_mag, -0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
         if(use_cache):
