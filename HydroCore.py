@@ -112,11 +112,10 @@ class SimulationState:
             case WhichRegime.RELATIVITY:
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
                 initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
-                log_pressure_guess = np.log(initial_guess)
                 # print("Init",initial_guess)
                 # print("Init",log_pressure_guess)
-                recovered_pressure_guess_log = newton(pressure_finding_func, log_pressure_guess,args = args, fprime=pressure_finding_func_der, maxiter=5)
-                out = construct_primitives_from_guess(recovered_pressure_guess_log, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                recovered_pressure_guess = newton(pressure_finding_func, initial_guess,args = args, fprime=pressure_finding_func_der, maxiter=5)
+                out = construct_primitives_from_guess(recovered_pressure_guess, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
 #                assert((index_primitive_var(out, PrimitiveIndex.DENSITY, self.n_variable_dimensions)>=0).all())
                 return out
             case _:
