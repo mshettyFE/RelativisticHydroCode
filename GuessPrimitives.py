@@ -84,7 +84,7 @@ def construct_primitives_from_guess(guess_pressure_log:npt.ArrayLike,
     output = np.zeros(U_cart.shape)
     # guess_pressure = np.clip(np.exp(guess_pressure_log), a_min=1E-9, a_max=None)
     guess_pressure = np.exp(guess_pressure_log)
-    print("Final",guess_pressure)
+    # print("Final",guess_pressure)
     flux  = U_cart[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:]
     D = U_cart[..., ConservativeIndex.DENSITY.value]
     boost = boost_guess(guess_pressure,U_cart, metric, sim_params, grid_info, n_spatial_dim)
