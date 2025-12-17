@@ -52,12 +52,6 @@ class SimulationState:
             self.dirac_delta_constant [i,i,...] = 1
 
            
-    def internal_enthalpy_primitive(self,W: npt.ArrayLike) -> npt.NDArray[np.float64]:
-        pressure = index_primitive_var(W, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
-        density = index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
-        internal_energy  =equation_of_state_primitive(self.simulation_params, pressure, density )
-        return 1 + internal_energy + pressure/density
-
     def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER ) -> npt.NDArray[np.float64]:
         output = np.zeros(W.shape)
         rho = index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
@@ -70,15 +64,15 @@ class SimulationState:
                 tau = rho* equation_of_state_primitive(self.simulation_params, pressure, rho)+0.5*rho*v_mag_2
                 output[...,ConservativeIndex.TAU.value] =  tau
                 output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho.T*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
-            case WhichRegime.RELATIVITY:     
-                enthalpy = self.internal_enthalpy_primitive(W)
-                velocities = W[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
+            case WhichRegime.RELATIVITY:
+                enthalpy = internal_enthalpy_primitive(W, self.simulation_params, self.n_variable_dimensions)
+                velocities = W[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables are part of 4 velocity. Size of (gridsize, dim)
                 alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
-                boost = self.metric.boost_field(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
+                boost = self.metric.boost_field_four_vel(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
                 D = rho*boost
                 output[...,ConservativeIndex.DENSITY.value] = D
-                output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D
-                first = rho*enthalpy*np.power(boost,2)
+                output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D 
+                first = rho*enthalpy*np.power(boost,1) # Not W^2 since velocity is 4 velocity, so you get rid of an extra boost
                 secon = (W[...,PrimitiveIndex.X_VELOCITY.value:].T)
                 output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:] =(first.T *secon).T
             case _:
@@ -117,14 +111,13 @@ class SimulationState:
                 return output
             case WhichRegime.RELATIVITY:
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
-                square_root_guess = np.power(index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions),0.5)
-                recovered_pressure_root = newton(pressure_finding_function, square_root_guess,args = args, fprime=pressure_finding_func_der, maxiter=100) 
-#                recovered_pressure_root = newton(pressure_finding_function, square_root_guess,args = args,  maxiter=1000) 
-                # print("Guess",guess,"Recover", recovered_pressure)
-                assert((recovered_pressure_root>=0).all())
-                out = construct_primitives_from_guess(recovered_pressure_root, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
-                assert((index_primitive_var(out, PrimitiveIndex.DENSITY, self.n_variable_dimensions)>0).all())
-#                print("Rocovered", np.sum(pressure_finding_function(recovered_pressure, *args))   )            
+                initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
+                log_pressure_guess = np.log(initial_guess)
+                # print("Init",initial_guess)
+                # print("Init",log_pressure_guess)
+                recovered_pressure_guess_log = newton(pressure_finding_func, log_pressure_guess,args = args, fprime=pressure_finding_func_der, maxiter=5)
+                out = construct_primitives_from_guess(recovered_pressure_guess_log, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+#                assert((index_primitive_var(out, PrimitiveIndex.DENSITY, self.n_variable_dimensions)>=0).all())
                 return out
             case _:
                 raise Exception("Unimplemented relativistic regime")
@@ -355,21 +348,19 @@ class SimulationState:
         metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
         rho  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
         pressure  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
-        velocities = W_cart_unpadded[...,2:]
+        velocities = W_cart_unpadded[...,2:] # spatial components of 4 velocity
         four_vel_shape  = [*velocities.shape]
         four_vel_shape[-1]  = four_vel_shape[-1]+1 # Add one for 0 component
         four_velocities  = np.zeros (four_vel_shape)
-        four_velocities[...,1:]  = velocities # spatial components
-        four_velocities[...,0] = 1 # 0th component
-        velocities = W_cart_unpadded[...,2:] # Assuming velocities are the trailing variables. Size of (gridsize, dim)
+        four_velocities[...,1:]  = velocities # fill in spatial components already
         alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
-        boost = self.metric.boost_field(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
-        four_velocities = (boost.T*four_velocities.T).T
+        boost = self.metric.boost_field_four_vel(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
+        four_velocities[...,0] = boost # 0th component
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
         u_u = np.einsum('...k,...l->kl...', four_velocities, four_velocities)
-        t_mu_nu_raised = rho*self.internal_enthalpy_primitive(W_cart_unpadded)*u_u +pressure*metric
+        t_mu_nu_raised = rho*internal_enthalpy_primitive(W_cart_unpadded, self.simulation_params, self.n_variable_dimensions)*u_u +pressure*metric
         return t_mu_nu_raised
 
     def SourceTerm(self,W:npt.ArrayLike):

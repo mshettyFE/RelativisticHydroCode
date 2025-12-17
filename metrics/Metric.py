@@ -55,7 +55,7 @@ class Metric(ABC):
             (WhichCacheTensor.PARTIAL_DER, WeightType.CENTER),
             (WhichCacheTensor.CHRISTOFFEL_UPPER0, WeightType.CENTER)  ,          
             (WhichCacheTensor.PARTIAL_LN_ALPHA, WeightType.CENTER)  ,          
-            (WhichCacheTensor.ALPHA, WeightType.CENTER)           
+            (WhichCacheTensor.ALPHA, WeightType.CENTER)
         ]
 
         # Fill up the caches
@@ -203,21 +203,29 @@ class Metric(ABC):
         weights = self.cell_weights(grid_info, weight_type, sim_params)
         return (U.T/weights.T).T
     
-    def spatial_vel_mag(self, velocities:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams,         epsilon = 1E-3):
-        # W is a ([ncells]*ndim,prim) where the prim denotes (\rho, P, and  up to 3 velocities)
+    def three_vector_mag(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
         spatial_metric = np.einsum("ij...->...ij",metric[index]) 
-        right = np.matvec(spatial_metric, velocities) # Sum over last index. Size is (gridsize, dim)
-        output = np.vecdot(velocities, right)
-#        return output
-        return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
+        right = np.matvec(spatial_metric, vec) # Sum over last index. Size is (gridsize, dim)
+        output = np.vecdot(vec, right)
+        return output
+        # return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
     
-    def boost_field(self, alpha: cached_array, velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
-        v2_mag  = self.spatial_vel_mag(velocities, grid_info, weight_type, sim_params)
-        return alpha.array*np.power(1-v2_mag, -0.5)
+    def boost_field_three_vel(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+        # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
+        v2_mag  = self.three_vector_mag(three_velocities, grid_info, weight_type, sim_params)
+        inter =1-v2_mag
+#        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
+        return alpha.array*np.power( inter, -0.5)
+
+    def boost_field_four_vel(self, alpha: cached_array, four_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+        # NOTE: velocities Need to be the spatial components of the 4 velocity vector
+        v2_mag  = self.three_vector_mag(four_velocities, grid_info, weight_type, sim_params)
+        inter =1+v2_mag
+        return alpha.array*np.power( inter, 0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
         if(use_cache):
