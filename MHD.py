@@ -47,11 +47,6 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
     primitives[upper_half, PrimitiveIndex.DENSITY.value] = rho_r
     primitives[upper_half, PrimitiveIndex.PRESSURE.value] = P_r
     primitives[upper_half, PrimitiveIndex.X_VELOCITY.value] = v_r
-    # Velocities are stored as the spatial components of the 4 velocity. Hence, we need to multiply the provided velocities by their Lorentz boost
-    if(relativistic==WhichRegime.RELATIVITY):
-        alpha = metric.get_metric_product(grid_info, WhichCacheTensor.ALPHA,WeightType.CENTER, simulation_params)
-        boost = metric.boost_field_three_vel(alpha,primitives[..., PrimitiveIndex.X_VELOCITY.value:] ,grid_info, WeightType.CENTER, simulation_params)
-        primitives[..., PrimitiveIndex.X_VELOCITY.value] =  primitives[..., PrimitiveIndex.X_VELOCITY.value]/boost
     return SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     )
@@ -82,11 +77,6 @@ def BondiAccretionInitialization(
     out = SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     )
-    # Velocities are stored as the spatial components of the 4 velocity. Hence, we need to multiply the provided velocities by their Lorentz boost
-    if(regime==WhichRegime.RELATIVITY):
-        alpha = metric.get_metric_product(grid_info, WhichCacheTensor.ALPHA,WeightType.CENTER, simulation_params)
-        boost = metric.boost_field_three_vel(alpha,primitives[..., PrimitiveIndex.X_VELOCITY.value:] ,grid_info, WeightType.CENTER, simulation_params)
-        primitives[..., PrimitiveIndex.X_VELOCITY.value] =  primitives[..., PrimitiveIndex.X_VELOCITY.value]/boost
     return out
 class Which1DTestProblem(Enum):
     CARTESIAN_SOD=0 
@@ -148,11 +138,6 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEW
     primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
     metric = CartesianMinkowski_1_2(grid_info, simulation_params)
     assert(metric.dimension==3) # 1+2 
-    # Velocities are stored as the spatial components of the 4 velocity. Hence, we need to multiply the provided velocities by their Lorentz boost
-    if(regime==WhichRegime.RELATIVITY):
-        alpha = metric.get_metric_product(grid_info, WhichCacheTensor.ALPHA,WeightType.CENTER, simulation_params)
-        boost = metric.boost_field_three_vel(alpha,primitives[..., PrimitiveIndex.X_VELOCITY.value:] ,grid_info, WeightType.CENTER, simulation_params)
-        primitives[..., PrimitiveIndex.X_VELOCITY.value] =  primitives[..., PrimitiveIndex.X_VELOCITY.value]/boost
     return SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     ) 

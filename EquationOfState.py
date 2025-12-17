@@ -5,7 +5,7 @@ def equation_of_state_primitive(sim_params: SimParams, pressure: npt.ArrayLike, 
     # Calculates internal energy as a function of pressure and density
     return pressure /( (sim_params.gamma-1) * density) 
 
-def pressure_from_epsilon(sim_params: SimParams, epsilon: npt.ArrayLike, density: npt.ArrayLike) -> npt.NDArray[np.float64]:
+def equation_of_state_epsilon(sim_params: SimParams, epsilon: npt.ArrayLike, density: npt.ArrayLike) -> npt.NDArray[np.float64]:
     # Calculates pressure as a function of internal energy (epsilon) and density
     return  (sim_params.gamma-1) * density * epsilon
 
@@ -22,6 +22,3 @@ def internal_enthalpy_primitive(W: npt.ArrayLike, sim_params: SimParams,  n_vari
 def internal_enthalpy_primitive_raws(pressure, density, sim_params: SimParams) -> npt.NDArray[np.float64]:
     internal_energy  =equation_of_state_primitive(sim_params, pressure, density )
     return 1 + internal_energy + pressure/density
-
-def internal_enthalpy_from_internal_energy(epsilon: npt.ArrayLike, sim_params: SimParams) -> npt.NDArray[np.float64]:
-    return 1+sim_params.gamma*epsilon

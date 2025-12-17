@@ -214,18 +214,12 @@ class Metric(ABC):
         return output
         # return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
     
-    def boost_field_three_vel(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+    def boost_field(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
         v2_mag  = self.three_vector_mag(three_velocities, grid_info, weight_type, sim_params)
         inter =1-v2_mag
 #        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
         return alpha.array*np.power( inter, -0.5)
-
-    def boost_field_four_vel(self, alpha: cached_array, four_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
-        # NOTE: velocities Need to be the spatial components of the 4 velocity vector
-        v2_mag  = self.three_vector_mag(four_velocities, grid_info, weight_type, sim_params)
-        inter =1+v2_mag
-        return alpha.array*np.power( inter, 0.5)
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
         if(use_cache):
@@ -238,7 +232,7 @@ class Metric(ABC):
         # Output was None, or we aren't using the cache. Need to generate the requested product
         mesh_grid = grid_info.mesh_grid(weight_type)
         expected_product_size, success =  self.expected_tensor_dimensions(mesh_grid, which_cache)
-        print("DEBUG", expected_product_size, which_cache, weight_type)
+        #print("DEBUG", expected_product_size, which_cache, weight_type)
         if(success==False): 
             raise Exception(expected_product_size) # Throw error message
         product = None
