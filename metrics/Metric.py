@@ -217,6 +217,7 @@ class Metric(ABC):
     def boost_field(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
         v2_mag  = self.three_vector_mag(three_velocities, grid_info, weight_type, sim_params)
+        np.clip(v2_mag, 0, 1.0 - 1e-14, out=v2_mag)
         inter =1-v2_mag
 #        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
         return alpha.array*np.power( inter, -0.5)

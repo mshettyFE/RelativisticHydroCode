@@ -3,6 +3,7 @@ from enum import Enum
 class BoundaryCondition(Enum):
     FIXED = 0 
     ZERO_GRAD = 1
+    REFLECTIVE = 2
 
 class BoundaryConditionManager:
     left_bcs: list[BoundaryCondition]

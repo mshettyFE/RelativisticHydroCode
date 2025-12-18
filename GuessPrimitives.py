@@ -19,6 +19,7 @@ def root_finding_func(guess: npt.ArrayLike,
     alpha = metric.get_metric_product(grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER, sim_params)
     flux_squared = metric.three_vector_mag(flux, grid_info, WeightType.CENTER, sim_params)
     v_mag_2 = flux_squared/np.power(guess,2)
+    np.clip(v_mag_2, 0, 1.0 - 1e-14, out=v_mag_2)
     # v_mag_2 = np.clip(v_mag_2, 0, 1.0 - 1e-14)    
     boost = np.power(1-v_mag_2,-0.5)
     D = index_conservative_var(U_cart, ConservativeIndex.DENSITY, n_spatial_dim)
@@ -71,6 +72,6 @@ def construct_primitives_from_guess(guess:npt.ArrayLike,
     rho = D/boost
     P = guess-Tau-D
     output[..., PrimitiveIndex.X_VELOCITY.value:] = (flux.T/guess.T).T
-    output[...,PrimitiveIndex.DENSITY.value] = rho 
+    output[...,PrimitiveIndex.DENSITY.value] = rho
     output[...,PrimitiveIndex.PRESSURE.value] = P
     return output

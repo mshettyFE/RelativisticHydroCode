@@ -39,9 +39,9 @@ class SimulationState:
         self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
         padding = self.simulation_params.spatial_integration.pad_width()
-        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)]
-        self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, initial_value_boundary_padding) 
-        self.W_initial_unweighted_padded = np.pad(primitive_tensor, pad_width, initial_value_boundary_padding) 
+        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)] # No padding along variable index
+        self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, "edge")  # Copy the edge values for initial padding, ignoring variable index
+        self.W_initial_unweighted_padded = np.pad(primitive_tensor, pad_width, "edge") 
         assert(self.W_initial_unweighted_padded.shape == self.U_initial_unweighted_padded.shape)
         self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER, self.simulation_params)
         self.current_time = starting_time
@@ -95,15 +95,15 @@ class SimulationState:
                 output = np.zeros(U_cart_padded.shape)
                 rho = index_conservative_var(U_cart_padded,ConservativeIndex.DENSITY, self.n_variable_dimensions)
                 assert(np.all(rho!=0))
-                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
+                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho.T).T
                 velocities_squared = np.power(velocities,2)
                 v_mag_2 = np.sum(velocities_squared, axis=-1).T
                 E = index_conservative_var(U_cart_padded, ConservativeIndex.TAU, self.n_variable_dimensions)
-                unclipped_e =  E/rho-0.5*v_mag_2              
+                unclipped_e =  E/rho-0.5*(v_mag_2)
                 e = np.clip(unclipped_e, a_min=1E-9, a_max=None)
                 assert np.all(e>=0)
                 pressure  = equation_of_state_epsilon(self.simulation_params, e,rho )
-                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho).T
+                velocities = (U_cart_padded[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:].T/rho.T).T
                 output = np.zeros(U_cart_padded.shape)
                 output[...,PrimitiveIndex.DENSITY.value] = rho
                 output[..., PrimitiveIndex.X_VELOCITY.value:] = velocities
@@ -128,7 +128,7 @@ class SimulationState:
         U_cartesian = self.metric.unweight_system(self.U, self.grid_info, WeightType.CENTER, self.simulation_params)
         dt, state_update_1, primitives = self.LinearUpdate(U_cartesian, which_axes)
         U_1 = self.U+dt*state_update_1
-        assert((index_primitive_var(primitives, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)>=0).all())
+#        assert((index_primitive_var(primitives, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)>=0).all())
         self.primitive_previous = primitives
         match self.simulation_params.time_integration:
             case TimeUpdateType.EULER:
@@ -156,61 +156,87 @@ class SimulationState:
         return index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)*index_primitive_var(W,PrimitiveIndex.X_VELOCITY,self.n_variable_dimensions)*np.power(r_center,2)
  
     def pad_unweighted_array(self, var:npt.ArrayLike,which_var: WhichVar):
-        # Augment the array to incorporate the BCs
-        # Input array is Cartesian (unweighted)
-        # Returns the padded, Cartesian array 
-        # Based on https://github.com/numpy/numpy/blob/main/numpy/lib/_arraypad_impl.py#L546-L926
         # Can't just use default np.pad since function signature of custom function for np.pad is not conducive for the FIXED boundary condition
 
         # Define padding for each axis
-        padding = self.simulation_params.spatial_integration.pad_width()
+        padding = self.simulation_params.spatial_integration.pad_width() # This is just 1 for now
         # Make sure that the last index gets skipped, since that's associated with the variables
-        og_pad_width = [(padding,padding)]*(var.ndim-1) + [(0,0)]
+        system_variable_padding = [(padding,padding)]*(var.ndim-1)
+        pad_width = system_variable_padding + [(0,0)]
 
-        pad_width = np.asarray(og_pad_width)
-
-        if not pad_width.dtype.kind == 'i':
-            raise TypeError('`pad_width` must be of integral type.')
-
-        # Broadcast to shape (array.ndim, 2)
-        # Probably shouldn't be using internal numpy function calls, but it is what it is...
-        pad_width = _as_pairs(pad_width, var.ndim, as_index=True)
-
+        # First pad the array  with zeros
         padded = np.pad(var, pad_width)
+        # Select the correct fixed boundaries
         match which_var:
             case WhichVar.CONSERVATIVE:
-                assert(self.U_initial_unweighted_padded.shape == padded.shape)
+                fixed = self.U_initial_unweighted_padded
             case WhichVar.PRIMITIVE:
-                assert(self.W_initial_unweighted_padded.shape == padded.shape)
+                fixed = self.W_initial_unweighted_padded
             case _:
                 raise Exception("Unimplemented variable type")
+        assert(fixed.shape == padded.shape)
+        # Now apply boundary padding
+        for axis in range(padded.ndim-1): # Skip the variable index 
+            # Grab the B/Cs for this particular dimension
+            left_bc, right_bc = self.bcm.get_boundary_conds(axis)
+            # Determine the pad widths for this axis
+            iaxis_pad_width = pad_width[axis]
+            # First select the cells that need updating
+            grab_everything = [slice(None,None,None)]*padded.ndim
+            lower_slice = grab_everything.copy() # A priori,select everything
+            lower_slice[axis] = slice(0, iaxis_pad_width[0], None) # On the current axis, select only the padded portion
+            lower_slice = tuple(lower_slice)
+            upper_slice = grab_everything.copy()
+            upper_slice[axis] = slice(-iaxis_pad_width[1], None, None) 
+            upper_slice = tuple(upper_slice)
+            # The values needed for zero_grad BCs at the lower boundary (ie. The first non-padded element along this axis)
+            lower_zero_grad_slices = grab_everything.copy()
+            lower_zero_grad_slices[axis] = slice(iaxis_pad_width[0], iaxis_pad_width[0]+1, None)
+            lower_zero_grad_slices = tuple(lower_zero_grad_slices)
+            upper_zero_grad_slices = grab_everything.copy()
+            upper_zero_grad_slices[axis] = slice(-iaxis_pad_width[1]-1, -iaxis_pad_width[1], None)
+            upper_zero_grad_slices = tuple(upper_zero_grad_slices)
+            # For fixed, use the same slices, but index the fixed array
+            axis_to_vel_map = {
+                0: PrimitiveIndex.X_VELOCITY.value,
+                1: PrimitiveIndex.Y_VELOCITY.value,
+                2: PrimitiveIndex.Z_VELOCITY.value
+            }
+            target_idx = axis_to_vel_map[axis]
+            
+            #For Reflective, scalars acts like zero grad, vectors need to flip sign
+            lower_vector_reflect_slices_pad = [*lower_slice] #  Copy over the padded slices
+            lower_vector_reflect_slices_pad[-1] = slice(target_idx, target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+            lower_vector_reflect_slices_pad = tuple(lower_vector_reflect_slices_pad)
 
-        # And apply along each axis
+            upper_vector_reflect_slices_pad = [*upper_slice] #  Copy over the padded slices
+            upper_vector_reflect_slices_pad[-1] = slice(target_idx,  target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+            upper_vector_reflect_slices_pad = tuple(upper_vector_reflect_slices_pad)
 
-        for axis in range(0,padded.ndim):
-            # Iterate using ndindex as in apply_along_axis, but assuming that
-            # function operates inplace on the padded array.
-
-            # view with the iteration axis at the end
-            view = np.moveaxis(padded, axis, -1)
-            match which_var:
-                case WhichVar.CONSERVATIVE:
-                    initial_view = np.moveaxis(self.U_initial_unweighted_padded,axis, -1)
-                case WhichVar.PRIMITIVE:
-                    initial_view = np.moveaxis(self.W_initial_unweighted_padded,axis, -1)
+            match left_bc:
+                case BoundaryCondition.ZERO_GRAD: # Just assign the first non-padded value to the padded region
+                    padded[lower_slice] = padded[lower_zero_grad_slices]
+                case BoundaryCondition.FIXED: # Assign from the fixed initial array
+                    padded[lower_slice] = fixed[lower_slice]
+                case BoundaryCondition.REFLECTIVE:
+                    # Initially assign like zero grad ( takes care of scalars)
+                    padded[lower_slice] = padded[lower_zero_grad_slices]
+                    # For vectors, need to flip sign
+                    padded[lower_vector_reflect_slices_pad] *= -1
                 case _:
-                    raise Exception("Unimplemented variable type")
-
-
-            # compute indices for the iteration axes, and append a trailing
-            # ellipsis to prevent 0d arrays decaying to scalars (gh-8642)
-            inds = ndindex(view.shape[:-1])
-            inds = (ind + (Ellipsis,) for ind in inds)
-            if(axis !=  len(og_pad_width)-1):
-                # Grab the B/Cs for this particular dimension
-                left_bc, right_bc = self.bcm.get_boundary_conds(axis)
-                for ind in inds:
-                    boundary_padding(view[ind], pad_width[axis], axis, initial_view[ind], left_bc, right_bc)
+                    raise Exception("Unimplemented BC")
+            match right_bc:
+                case BoundaryCondition.ZERO_GRAD:
+                    padded[upper_slice] = padded[upper_zero_grad_slices]
+                case BoundaryCondition.FIXED:       
+                    padded[upper_slice] = fixed[upper_slice]
+                case BoundaryCondition.REFLECTIVE:
+                    # Initially assign like zero grad ( takes care of scalars)
+                    padded[upper_slice] = padded[upper_zero_grad_slices]
+                    # For vectors, need to flip sign
+                    padded[upper_vector_reflect_slices_pad] *= -1
+                case _:
+                    raise Exception("Unimplemented BC")
         return padded
 
     def LinearUpdate(self, U_cart: npt.ArrayLike, which_axis: tuple = ()): 

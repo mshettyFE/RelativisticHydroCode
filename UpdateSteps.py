@@ -23,7 +23,7 @@ class SpatialUpdate:
             case SpatialUpdateType.FLAT:
                 pad_width = 1
             case SpatialUpdateType.PLM:
-                pad_width = 2
+                raise Exception("PLM spatial update not yet implemented")
             case _:
                 raise Exception("Invalid spatial integration type. Can't assign pad width")
         return pad_width

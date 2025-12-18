@@ -40,45 +40,6 @@ class SimParams:
     spatial_integration: SpatialUpdate
     regime: WhichRegime 
 
-## Padding helpers
-
-def initial_value_boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:int , kwargs: dict):
-    # Following Note from: https://numpy.org/devdocs/reference/generated/numpy.pad.html
-    # vector is a 1D array that is already padded 
-    # iaxis_pad_width denotes how many elements of each size are the padded elements  
-    #   So the padded portions are vector[:iaxis_pad_width[0]] and vector[-iaxis_pad_width[1]:]
-    # iaxis denotes which axis this vector is associated with 
-    # kwargs is an empty dictionary
-    # Propagate the original edge values to their respective edges
-    vector[:iaxis_pad_width[0]] = vector[iaxis_pad_width[0]]
-    if(iaxis_pad_width[1]!=0):
-        vector[-iaxis_pad_width[1]:] = vector[-iaxis_pad_width[1]-1]
-
-def boundary_padding(vector:npt.NDArray, iaxis_pad_width:tuple[int,int],  iaxis:int , 
-                     initial_boundary: npt.NDArray, left_bc: BoundaryCondition, right_bc: BoundaryCondition):
-    # Following Note from: https://numpy.org/devdocs/reference/generated/numpy.pad.html
-    # vector is a 1D array that is already padded 
-    # iaxis_pad_width denotes how many elements of each size are the padded elements  
-    #   So the padded portions are vector[:iaxis_pad_width[0]] and vector[-iaxis_pad_width[1]:]
-    # iaxis denotes which axis this vector is associated with 
-    # kwargs is an empty dictionary
-    match left_bc:
-        case BoundaryCondition.ZERO_GRAD:
-            vector[:iaxis_pad_width[0]] = vector[iaxis_pad_width[0]]
-        case BoundaryCondition.FIXED:
-            vector[:iaxis_pad_width[0]] = initial_boundary[iaxis_pad_width[0]]
-        case _:
-            raise Exception("Unimplemented BC")
-    match right_bc:
-        case BoundaryCondition.ZERO_GRAD:
-            if(iaxis_pad_width[1]!=0):
-                vector[-iaxis_pad_width[1]:] = vector[-iaxis_pad_width[1]-1]
-        case BoundaryCondition.FIXED:
-            if(iaxis_pad_width[1]!=0):  
-                vector[-iaxis_pad_width[1]:] = initial_boundary[-iaxis_pad_width[1]-1]
-        case _:
-            raise Exception("Unimplemented BC")
-
 ## Indexing variable tensors
 
 def index_conservative_var(U_cart: npt.ArrayLike, var_type: ConservativeIndex, n_variable_dims: int): 

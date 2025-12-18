@@ -121,21 +121,20 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEW
                                   include_source=False, time_integration=TimeUpdateType.RK3, spatial_integration=spatial_update,
                                   regime=regime)
     bcm = BoundaryConditionManager(
-            [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD], 
-            [BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD]
+            [BoundaryCondition.REFLECTIVE, BoundaryCondition.REFLECTIVE], 
+            [BoundaryCondition.REFLECTIVE, BoundaryCondition.REFLECTIVE]
             )
-    grid_shape = grid_info.NCells
-    primitives = np.zeros( list(grid_shape)+[4]  ) 
-    grid_centers_x = grid_info.construct_grid_centers(0)
-    grid_centers_y = grid_info.construct_grid_centers(1)
-    xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
+    xx,yy = grid_info.meshgrid_center
     summed = xx+yy
+    primitives = np.zeros( [*summed.shape]+[4]  ) 
     lower = summed < 0.15
     upper = summed >= 0.15 
     primitives[lower, PrimitiveIndex.DENSITY.value] = 0.125
     primitives[lower, PrimitiveIndex.PRESSURE.value] = 0.125
     primitives[upper, PrimitiveIndex.DENSITY.value] = 1.0
     primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
+    primitives[..., PrimitiveIndex.X_VELOCITY.value] = 0
+    primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0
     metric = CartesianMinkowski_1_2(grid_info, simulation_params)
     assert(metric.dimension==3) # 1+2 
     return SimulationState(
@@ -168,13 +167,15 @@ def runSim2D(which_sim: Which2DTestProblem):
 
 if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
-    # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    # Plotting.plot_results_1D()
-    runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    runSim1D(Which1DTestProblem.CARTESIAN_SOD)
     Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
+    # Plotting.plot_2D_anim()
+    # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
     # Plotting.plot_2D_anim()
