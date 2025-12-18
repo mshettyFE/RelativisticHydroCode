@@ -62,3 +62,8 @@ class CartesianMinkowski_1_2(Metric):
         # Use self.expected_tensor_dimension() to generate expected_product_size
         output = np.ones(expected_product_size)
         return output 
+    
+    def beta(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams ) ->  npt.NDArray[np.float64]:
+        # Use self.expected_tensor_dimension() to generate expected_product_size
+        output = np.zeros(expected_product_size)
+        return output

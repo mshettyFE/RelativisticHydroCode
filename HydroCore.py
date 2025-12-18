@@ -1,18 +1,15 @@
-import numpy.typing as npt
+import numpy.typing as nptCOre
 from enum import Enum
 import numpy as np
-from numpy.lib._index_tricks_impl import ndindex
-from numpy.lib._arraypad_impl import _as_pairs
 from GridInfo import GridInfo, WeightType
 from UpdateSteps import TimeUpdateType,SpatialUpdate, SpatialUpdateType
-from BoundaryManager import BoundaryConditionManager
-from metrics import Metric
-from metrics.Metric import WhichCacheTensor, METRIC_VARIABLE_INDEX
+from BoundaryManager import BoundaryConditionManager, BoundaryCondition
+from metrics.Metric import Metric
+from metrics.Metric import METRIC_VARIABLE_INDEX , WhichCacheTensor
 from HelperFunctions import *
 from GuessPrimitives import *
 from EquationOfState import *
 from scipy.optimize import newton
-from numpy.testing import assert_allclose
 
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
@@ -69,9 +66,9 @@ class SimulationState:
                 output[..., ConservativeIndex.X_MOMENTUM_DENSITY.value:] = (rho.T*W[...,PrimitiveIndex.X_VELOCITY.value:].T).T
             case WhichRegime.RELATIVITY:
                 enthalpy = internal_enthalpy_primitive(W, self.simulation_params, self.n_variable_dimensions)
-                velocities = W[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables are part of 4 velocity. Size of (gridsize, dim)
+                velocities = W[...,PrimitiveIndex.X_VELOCITY.value:]
                 alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
-                boost = self.metric.boost_field(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
+                boost = self.metric.W(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
                 D = rho*boost
                 output[...,ConservativeIndex.DENSITY.value] = D
                 output[...,ConservativeIndex.TAU.value] = rho*enthalpy*np.power(boost,2)-pressure-D 
@@ -272,28 +269,38 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented Spatial Update")
     
+    def shift_three_velocity_padded(self, three_velocities_padded: npt.ArrayLike) -> npt.NDArray:
+        shift_vec = self.metric.shift_vector(self.grid_info, self.simulation_params)
+        padding = self.simulation_params.spatial_integration.pad_width()
+        system_variable_padding = [(padding,padding)]*(shift_vec.ndim-1)
+        pad_width = system_variable_padding + [(0,0)] # No padding along variable index
+        shift_vec_padded = np.pad(shift_vec, pad_width, "edge")
+        return three_velocities_padded - shift_vec_padded
+
     def density_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index)
-        D = U_padded_cart[...,ConservativeIndex.DENSITY.value]
-        velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
-        return (D.T*velocity.T).T
+        shifted_velocity = self.shift_three_velocity_padded(W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:])
+        D = index_conservative_var(U_padded_cart, ConservativeIndex.DENSITY, self.n_variable_dimensions)
+        return (D.T*shifted_velocity.T).T
 
     def momentum_flux_tensor(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index, spatial_index) where the first indexes the coordinate and the 2nd indexes the direction
-        density = W_padded_cart[...,PrimitiveIndex.DENSITY.value]
-        velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
+        shifted_velocity = self.shift_three_velocity_padded(W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:])
+#        flux = U_padded_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:]
         pressure = index_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
+        flux = U_padded_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:]
         pressure_tensor = pressure*self.dirac_delta_constant
-        KE = density*np.einsum("...i,...j->ij...", velocity, velocity)
-        output = np.einsum("ij...->...ij", KE+pressure_tensor)
-        return output
+        pressure_tensor = np.einsum("ij...->...ij", pressure_tensor)
+        KE = np.einsum("...i,...j->...ij", flux, shifted_velocity)
+        return KE+pressure_tensor
     
     def tau_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index)
-        Energy =  index_conservative_var(U_padded_cart, ConservativeIndex.TAU, self.n_variable_dimensions)
+        Tau =  index_conservative_var(U_padded_cart, ConservativeIndex.TAU, self.n_variable_dimensions)
         pressure = index_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
         velocity = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:]
-        return ((Energy+pressure).T*velocity.T).T
+        shifted_velocity = self.shift_three_velocity_padded(W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:])
+        return (Tau.T*shifted_velocity.T+ pressure.T*velocity.T).T
 
     def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
                            density_flux: npt.ArrayLike, momentum_flux_tensor: npt.ArrayLike, tau_flux: npt.ArrayLike,
@@ -371,20 +378,24 @@ class SimulationState:
         metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
         rho  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
         pressure  = index_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
-        velocities = W_cart_unpadded[...,2:] # spatial components of 4 velocity
+        velocities = W_cart_unpadded[...,PrimitiveIndex.X_VELOCITY.value:] # spatial components of 4 velocity
         four_vel_shape  = [*velocities.shape]
         four_vel_shape[-1]  = four_vel_shape[-1]+1 # Add one for 0 component
         four_velocities  = np.zeros (four_vel_shape)
-        four_velocities[...,1:]  = velocities # fill in spatial components already
         four_velocities[...,0] = 1 # 0th component
-        alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
-        boost = self.metric.boost(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
-        four_velocities[...] /= boost
+        # First shift the spatial velocities to the current spacelike slice
+        shifted_three_velocities = self.metric.shift_three_velocity(velocities, self.grid_info, self.simulation_params)
+        four_velocities[...,1:] = shifted_three_velocities 
+        # Scale by the boost
+        alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER, self.simulation_params).array
+        W = self.metric.W(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
+        four_velocities[...] = (W.T*four_velocities[...].T).T
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
         u_u = np.einsum('...k,...l->kl...', four_velocities, four_velocities)
-        t_mu_nu_raised = rho*internal_enthalpy_primitive(W_cart_unpadded, self.simulation_params, self.n_variable_dimensions)*u_u +pressure*metric
+        inv_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
+        t_mu_nu_raised = rho*internal_enthalpy_primitive(W_cart_unpadded, self.simulation_params, self.n_variable_dimensions)*u_u +pressure*inv_metric
         return t_mu_nu_raised
 
     def SourceTerm(self,W:npt.ArrayLike):

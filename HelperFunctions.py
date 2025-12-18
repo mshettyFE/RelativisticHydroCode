@@ -3,7 +3,6 @@ from enum import Enum
 import numpy as np
 from dataclasses import dataclass
 from UpdateSteps import TimeUpdateType,SpatialUpdate
-from BoundaryManager import BoundaryCondition 
 
 class WhichRegime(Enum):
     NEWTONIAN = 0
@@ -42,7 +41,7 @@ class SimParams:
 
 ## Indexing variable tensors
 
-def index_conservative_var(U_cart: npt.ArrayLike, var_type: ConservativeIndex, n_variable_dims: int): 
+def index_conservative_var(U_cart: npt.ArrayLike, var_type: ConservativeIndex, n_variable_dims: int):
     match n_variable_dims:
         case 1:
             max_allowed_index = ConservativeIndex.X_MOMENTUM_DENSITY

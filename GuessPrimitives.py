@@ -1,13 +1,11 @@
 from HydroCore import SimParams
 import numpy.typing as npt
 import numpy as np
-from metrics.Metric import Metric, WhichCacheTensor 
+from metrics.Metric import Metric, WhichCacheTensor
 from GridInfo import GridInfo, WeightType
 from HelperFunctions import index_conservative_var, index_primitive_var, PrimitiveIndex, ConservativeIndex
 from EquationOfState import *
 
-# https://iopscience.iop.org/article/10.1086/498238/pdf
-# guess = \rho h boost^2
 
 def root_finding_func(guess: npt.ArrayLike,
                               U_cart: npt.ArrayLike, 
@@ -69,6 +67,6 @@ def construct_primitives_from_guess(guess:npt.ArrayLike,
     W2 = np.power(1-v_mag_2,-1)
     W = np.sqrt(W2)
     output[...,PrimitiveIndex.DENSITY.value] = D/W
-    output[...,PrimitiveIndex.X_VELOCITY.value:] = ((W.T*flux.T)/(z.T)).T
+    output[...,PrimitiveIndex.X_VELOCITY.value:] = ((flux.T)/(W.T*z.T)).T
     output[...,PrimitiveIndex.PRESSURE.value] = guess
     return output
