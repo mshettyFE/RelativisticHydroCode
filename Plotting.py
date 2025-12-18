@@ -7,6 +7,7 @@ from GridInfo import WeightType
 from metrics import Metric
 from GuessPrimitives import sound_speed
 from HelperFunctions import index_primitive_var, WhichVar
+from matplotlib import colors
 
 def plot_results_1D(
     input_pkl_file: str = "snapshot.pkl",
@@ -108,12 +109,13 @@ def plot_2D_anim(
 
     # Initialize image using the first array
     t0, Z0 = data[0]
-    vmin = 0.2
-    vmax = 1.5 
+    plot_var = Z0[...,0]
+    vmin = plot_var.min()
+    vmax = plot_var.max()
     grid_centers_x = last_state.grid_info.construct_grid_centers(0)
     grid_centers_y = last_state.grid_info.construct_grid_centers(1)
     xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
-    quad = ax.pcolormesh(xx, yy, Z0[...,0].T, shading='auto', vmin=vmin, vmax=vmax, cmap='viridis')
+    quad = ax.pcolormesh(xx, yy, plot_var.T, shading='auto', cmap='viridis', norm=colors.LogNorm(vmin=vmin, vmax=vmax))
     fig.colorbar(quad, ax=ax)
     ax.set_title(f"t = {data[0][0]:.3f}")
 

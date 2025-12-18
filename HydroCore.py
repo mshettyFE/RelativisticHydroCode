@@ -12,6 +12,7 @@ from HelperFunctions import *
 from GuessPrimitives import *
 from EquationOfState import *
 from scipy.optimize import newton
+from numpy.testing import assert_allclose
 
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
@@ -38,6 +39,8 @@ class SimulationState:
         self.bcm = a_bcm
         self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
+        # print(primitive_tensor )
+        # print(U_unweighted_initial)
         padding = self.simulation_params.spatial_integration.pad_width()
         pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)] # No padding along variable index
         self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, "edge")  # Copy the edge values for initial padding, ignoring variable index
@@ -110,15 +113,10 @@ class SimulationState:
                 output[...,PrimitiveIndex.PRESSURE.value] =  pressure
                 return output
             case WhichRegime.RELATIVITY:
-                enthalpy = internal_enthalpy_primitive(self.primitive_previous, self.simulation_params, self.n_variable_dimensions)
-                velocities = self.primitive_previous[...,PrimitiveIndex.X_VELOCITY.value:] # Assuming velocities are the trailing variables are part of 4 velocity. Size of (gridsize, dim)
-                alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
-                boost = self.metric.boost_field(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
-                initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.DENSITY, self.n_variable_dimensions)*np.power(boost,2)*enthalpy
-                # log_pressure_guess = np.log(initial_guess)
-                recovere_guess = newton(root_finding_func, initial_guess,args = args, fprime=root_finding_func_der, maxiter=5)
-                out = construct_primitives_from_guess(recovere_guess, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
+                recovered_guess = newton(root_finding_func, initial_guess,args = args)
+                out = construct_primitives_from_guess(recovered_guess, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
                 return out
             case _:
                 raise Exception("Unimplemented relativistic regime")
@@ -315,7 +313,7 @@ class SimulationState:
             ], 
             axis=-1)
         alpha_minus, alpha_plus = self.alpha_plus_minus(W_padded_cart)
-        alpha_sum = alpha_minus+alpha_plus 
+        alpha_sum = alpha_minus+alpha_plus
         assert(np.all(alpha_sum != 0))
         alpha_prod = alpha_minus*alpha_plus
         # Bunch of .T because numpy broadcasting rules
@@ -342,8 +340,6 @@ class SimulationState:
         slices_minus_half = tuple(slices_minus_half)
         cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[slices_plus_half].T
         cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_minus_half].T
-        # cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[1:,...]
-        # cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[:-1,...]         
         return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta(spatial_index)[spatial_index], alpha_plus, alpha_minus
 
     def alpha_plus_minus(self, primitives: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
