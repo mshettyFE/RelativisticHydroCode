@@ -241,7 +241,7 @@ class Metric(ABC):
     def shift_vector(self, grid_info: GridInfo, sim_params: SimParams)-> npt.NDArray:
         beta = self.get_metric_product( grid_info, WhichCacheTensor.BETA, WeightType.CENTER,  sim_params).array
         alpha = self.get_metric_product( grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER,  sim_params).array
-        shift = (beta/alpha).T
+        shift = beta/alpha
         return shift
     
     def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:

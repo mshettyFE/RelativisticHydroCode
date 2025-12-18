@@ -6,7 +6,7 @@ from HydroCore import PrimitiveIndex, SimulationState
 from GridInfo import WeightType
 from metrics import Metric
 from GuessPrimitives import sound_speed
-from HelperFunctions import index_primitive_var, WhichVar
+from HelperFunctions import index_primitive_var, VariableSet
 from matplotlib import colors
 
 def plot_results_1D(
@@ -36,13 +36,13 @@ def plot_results_1D(
     t, U = history[which_slice]
     sim_state.U = U
     U_cart = sim_state.metric.unweight_system(U, sim_state.grid_info, WeightType.CENTER, sim_state.simulation_params)
-    U_cart_padded = sim_state.pad_unweighted_array(U_cart, WhichVar.CONSERVATIVE)
+    U_cart_padded = sim_state.pad_array(U_cart, sim_state.U_initial_unweighted_padded, VariableSet.CONSERVATIVE)
     W = sim_state.conservative_to_primitive(U_cart_padded)
 
     rho = index_primitive_var( W,PrimitiveIndex.DENSITY,sim_state.n_variable_dimensions).flatten()
     v = index_primitive_var( W,PrimitiveIndex.X_VELOCITY,sim_state.n_variable_dimensions).flatten()
     P = index_primitive_var( W,PrimitiveIndex.PRESSURE,sim_state.n_variable_dimensions).flatten()
-    c_s = sound_speed(sim_state.simulation_params, P, rho).flatten()
+    c_s = sound_speed(sim_state.simulation_params, P, rho, sim_state.simulation_params.regime).flatten()
 
     label = f"t = {t:.3f}"
 

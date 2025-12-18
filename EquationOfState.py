@@ -9,10 +9,16 @@ def equation_of_state_epsilon(sim_params: SimParams, epsilon: npt.ArrayLike, den
     # Calculates pressure as a function of internal energy (epsilon) and density
     return  (sim_params.gamma-1) * density * epsilon
 
-def sound_speed(simulation_params: SimParams, pressure: npt.ArrayLike, density: npt.ArrayLike):
+def sound_speed(simulation_params: SimParams, pressure: npt.ArrayLike, density: npt.ArrayLike, which_regime: WhichRegime = WhichRegime.NEWTONIAN) -> npt.NDArray[np.float64]:
     # Return sound speed given pressure and density
-#    h = internal_enthalpy_primitive_raws(pressure,density,simulation_params)
-    return np.sqrt(simulation_params.gamma* pressure / density)
+    match which_regime:
+        case WhichRegime.RELATIVITY:
+            h = internal_enthalpy_primitive_raws(pressure,density,simulation_params)
+            return np.sqrt(simulation_params.gamma* pressure / density/h)
+            # return np.sqrt(simulation_params.gamma* pressure / density) # NOTE: TEmporary
+        case WhichRegime.NEWTONIAN:
+            return np.sqrt(simulation_params.gamma* pressure / density)
+    return 
 
 def internal_enthalpy_primitive(W: npt.ArrayLike, sim_params: SimParams,  n_variable_dims) -> npt.NDArray[np.float64]:
     pressure = index_primitive_var(W, PrimitiveIndex.PRESSURE,n_variable_dims)

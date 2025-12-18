@@ -8,9 +8,12 @@ class WhichRegime(Enum):
     NEWTONIAN = 0
     RELATIVITY = 1
 
-class WhichVar(Enum):
+class VariableSet(Enum):
     PRIMITIVE  =0
     CONSERVATIVE   =1
+    VECTOR = 2
+    SCALAR =3
+    METRIC = 4
 
 
 # NOTE: Is there a confusion between internal energy and internal enthalpy usage?

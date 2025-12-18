@@ -97,7 +97,7 @@ def runSim1D(which_sim: Which1DTestProblem):
         case Which1DTestProblem.CARTESIAN_SOD:
             save_frequency = 1
             which_axes = ()
-            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, Courant=0.5, Gamma=1.4, N_cells=10, t_max=0.36) 
+            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, Courant=0.5, Gamma=1.4, N_cells=1000, t_max=0.1) 
         case Which1DTestProblem.SR_CARTESIAN_SOD:
             save_frequency = 1
             which_axes = ()
@@ -177,7 +177,7 @@ def runSim2D(which_sim: Which2DTestProblem):
     save_results(history, state_sim)
 
 if __name__ == "__main__":
-    np.set_printoptions(threshold=sys.maxsize)
+#    np.set_printoptions(threshold=sys.maxsize)
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
     # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
     # Plotting.plot_results_1D()

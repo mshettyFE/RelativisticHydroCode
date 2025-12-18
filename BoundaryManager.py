@@ -18,9 +18,10 @@ class BoundaryConditionManager:
         self.right_bcs = right_boundaries 
 
     def get_boundary_conds(self, index: int) -> tuple[BoundaryCondition,BoundaryCondition]:
-        assert( (index>=0) and (index < len(self.left_bcs)))
-        return (self.left_bcs[index], self.right_bcs[index])
-
+        if ( (index>=0) and (index < len(self.left_bcs))):
+            return (self.left_bcs[index], self.right_bcs[index])
+        else:
+            return (BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD) # Hack to deal with arrays like the metric tensor
 
 if __name__=="__main__":
     pass

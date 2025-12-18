@@ -36,12 +36,23 @@ class SimulationState:
         self.bcm = a_bcm
         self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
-        # print(primitive_tensor )
-        # print(U_unweighted_initial)
         padding = self.simulation_params.spatial_integration.pad_width()
-        pad_width = [(padding,padding)]*(U_unweighted_initial.ndim-1)+ [(0,0)] # No padding along variable index
-        self.U_initial_unweighted_padded = np.pad(U_unweighted_initial, pad_width, "edge")  # Copy the edge values for initial padding, ignoring variable index
-        self.W_initial_unweighted_padded = np.pad(primitive_tensor, pad_width, "edge") 
+         # No padding along variable index
+        v_mag_2_fixed = self.metric.three_vector_mag(self.primitive_previous[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
+        shifted_velocity_fixed = self.metric.shift_vector(self.grid_info, self.simulation_params)
+        alpha_fixed = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array
+        inverse_metric_fixed = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
+        beta_fixed = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.BETA,  WeightType.CENTER, self.simulation_params).array
+
+        # Copy the edge values for initial padding, ignoring variable index. Used for FIXED B/Cs
+        self.U_initial_unweighted_padded =  self.generate_fixed_padding(U_unweighted_initial, VariableSet.CONSERVATIVE)
+        self.W_initial_unweighted_padded = self.generate_fixed_padding(primitive_tensor, VariableSet.PRIMITIVE)
+        self.v_mag2_fixed_padded = self.generate_fixed_padding(v_mag_2_fixed, VariableSet.SCALAR)
+        self.shifted_velocity_fixed_padding = self.generate_fixed_padding(shifted_velocity_fixed, VariableSet.VECTOR)
+        self.alpha_fixed_padded = self.generate_fixed_padding(alpha_fixed, VariableSet.SCALAR)
+        self.inverse_metric_fixed_padded = self.generate_fixed_padding(inverse_metric_fixed, VariableSet.METRIC)
+        self.inverse_beta_fixed_padded = self.generate_fixed_padding(beta_fixed, VariableSet.VECTOR) 
+
         assert(self.W_initial_unweighted_padded.shape == self.U_initial_unweighted_padded.shape)
         self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER, self.simulation_params)
         self.current_time = starting_time
@@ -51,7 +62,7 @@ class SimulationState:
         for i in range(self.n_variable_dimensions):
             self.dirac_delta_constant [i,i,...] = 1
 
-           
+         
     def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER ) -> npt.NDArray[np.float64]:
         output = np.zeros(W.shape)
         rho = index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
@@ -150,34 +161,84 @@ class SimulationState:
         W = self.conservative_to_primitive(unweighted_U)
         return index_primitive_var(W, PrimitiveIndex.DENSITY,self.n_variable_dimensions)*index_primitive_var(W,PrimitiveIndex.X_VELOCITY,self.n_variable_dimensions)*np.power(r_center,2)
  
-    def pad_unweighted_array(self, var:npt.ArrayLike,which_var: WhichVar):
+
+    def axis_to_vector_index_map(self, var_type: VariableSet) -> dict:
+        match var_type:
+            case VariableSet.CONSERVATIVE:
+                axis_to_vel_map = {
+                    0: ConservativeIndex.X_MOMENTUM_DENSITY.value,
+                    1: ConservativeIndex.Y_MOMENTUM_DENSITY.value,
+                    2: ConservativeIndex.Z_MOMENTUM_DENSITY.value
+                }
+            case VariableSet.PRIMITIVE:
+                axis_to_vel_map = {
+                    0: PrimitiveIndex.X_VELOCITY.value,
+                    1: PrimitiveIndex.Y_VELOCITY.value,
+                    2: PrimitiveIndex.Z_VELOCITY.value
+                }
+            case VariableSet.VECTOR:
+                axis_to_vel_map = {
+                    0: 0,
+                    1: 1,
+                    2: 2
+                }
+            case VariableSet.SCALAR:
+                axis_to_vel_map = {}
+            case VariableSet.METRIC:
+                axis_to_vel_map = {}
+            case _:
+                raise Exception("Unimplemented variable type for axis to vector index mapping")
+        return axis_to_vel_map
+    
+    def excluded_padding_axes(self, array: npt.ArrayLike, var_type: VariableSet) -> list:
+        match var_type:
+            case VariableSet.CONSERVATIVE | VariableSet.PRIMITIVE:
+                return [array.ndim - 1]
+            case VariableSet.VECTOR:
+                return [0] # NOTE: Hack for now since the only vectors have the variable index at the start
+            case VariableSet.SCALAR:
+                return []
+            case VariableSet.METRIC:
+                return [0,1 ]
+            case _:
+                raise Exception("Unimplemented variable type for excluded padding axes")
+
+
+    def generate_fixed_padding(self, var, var_set: VariableSet):
+        padding = self.simulation_params.spatial_integration.pad_width() # NOTE: This is just 1 for now. Would need to modify for MiniMod
+        pad_width = [(padding,padding)]*(var.ndim)
+        assert(self.n_variable_dimensions <= var.ndim)
+        has_variables = self.n_variable_dimensions != var.ndim 
+        if(has_variables):
+            excluded_axes = self.excluded_padding_axes(var, var_set)
+            for axis in excluded_axes:
+                pad_width[axis] = (0,0)
+        return np.pad(var, pad_width, "edge")
+
+    def pad_array(self, var:npt.ArrayLike, fixed: npt.ArrayLike, var_set: VariableSet) -> npt.NDArray:
         # Can't just use default np.pad since function signature of custom function for np.pad is not conducive for the FIXED boundary condition
-
-        # Define padding for each axis
-        padding = self.simulation_params.spatial_integration.pad_width() # This is just 1 for now
-        # Make sure that the last index gets skipped, since that's associated with the variables
-        system_variable_padding = [(padding,padding)]*(var.ndim-1)
-        pad_width = system_variable_padding + [(0,0)]
-
+        assert(self.n_variable_dimensions <= var.ndim)
+        has_variables = self.n_variable_dimensions != var.ndim
+        padding = self.simulation_params.spatial_integration.pad_width() # NOTE: This is just 1 for now. Would need to modify for MiniMod
+        pad_width = [(padding,padding)]*(var.ndim)
+        included_axes = list(range(var.ndim)) # Initially include all axes
+        if(has_variables):
+            excluded_axes = self.excluded_padding_axes(var, var_set)
+            for axis in excluded_axes:
+                included_axes.remove(axis) # Skip this axis while iterating
+                pad_width[axis] = (0,0)
+        grab_everything = [slice(None,None,None)]*var.ndim
         # First pad the array  with zeros
         padded = np.pad(var, pad_width)
         # Select the correct fixed boundaries
-        match which_var:
-            case WhichVar.CONSERVATIVE:
-                fixed = self.U_initial_unweighted_padded
-            case WhichVar.PRIMITIVE:
-                fixed = self.W_initial_unweighted_padded
-            case _:
-                raise Exception("Unimplemented variable type")
         assert(fixed.shape == padded.shape)
         # Now apply boundary padding
-        for axis in range(padded.ndim-1): # Skip the variable index 
+        for axis in included_axes:
             # Grab the B/Cs for this particular dimension
             left_bc, right_bc = self.bcm.get_boundary_conds(axis)
             # Determine the pad widths for this axis
             iaxis_pad_width = pad_width[axis]
             # First select the cells that need updating
-            grab_everything = [slice(None,None,None)]*padded.ndim
             lower_slice = grab_everything.copy() # A priori,select everything
             lower_slice[axis] = slice(0, iaxis_pad_width[0], None) # On the current axis, select only the padded portion
             lower_slice = tuple(lower_slice)
@@ -192,21 +253,19 @@ class SimulationState:
             upper_zero_grad_slices[axis] = slice(-iaxis_pad_width[1]-1, -iaxis_pad_width[1], None)
             upper_zero_grad_slices = tuple(upper_zero_grad_slices)
             # For fixed, use the same slices, but index the fixed array
-            axis_to_vel_map = {
-                0: PrimitiveIndex.X_VELOCITY.value,
-                1: PrimitiveIndex.Y_VELOCITY.value,
-                2: PrimitiveIndex.Z_VELOCITY.value
-            }
-            target_idx = axis_to_vel_map[axis]
-            
-            #For Reflective, scalars acts like zero grad, vectors need to flip sign
-            lower_vector_reflect_slices_pad = [*lower_slice] #  Copy over the padded slices
-            lower_vector_reflect_slices_pad[-1] = slice(target_idx, target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
-            lower_vector_reflect_slices_pad = tuple(lower_vector_reflect_slices_pad)
+            axis_to_vel_map  = self.axis_to_vector_index_map(var_set)
+            has_vector_components = len(axis_to_vel_map)>0
+            if(has_vector_components): # (Only need to do this if we have vector variables)
+                target_idx = axis_to_vel_map[axis]
+                
+                #For Reflective, scalars acts like zero grad, vectors need to flip sign
+                lower_vector_reflect_slices_pad = [*lower_slice] #  Copy over the padded slices
+                lower_vector_reflect_slices_pad[-1] = slice(target_idx, target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+                lower_vector_reflect_slices_pad = tuple(lower_vector_reflect_slices_pad)
 
-            upper_vector_reflect_slices_pad = [*upper_slice] #  Copy over the padded slices
-            upper_vector_reflect_slices_pad[-1] = slice(target_idx,  target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
-            upper_vector_reflect_slices_pad = tuple(upper_vector_reflect_slices_pad)
+                upper_vector_reflect_slices_pad = [*upper_slice] #  Copy over the padded slices
+                upper_vector_reflect_slices_pad[-1] = slice(target_idx,  target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+                upper_vector_reflect_slices_pad = tuple(upper_vector_reflect_slices_pad)
 
             match left_bc:
                 case BoundaryCondition.ZERO_GRAD: # Just assign the first non-padded value to the padded region
@@ -216,8 +275,9 @@ class SimulationState:
                 case BoundaryCondition.REFLECTIVE:
                     # Initially assign like zero grad ( takes care of scalars)
                     padded[lower_slice] = padded[lower_zero_grad_slices]
-                    # For vectors, need to flip sign
-                    padded[lower_vector_reflect_slices_pad] *= -1
+                    if(has_vector_components):
+                        # For vectors, need to flip sign
+                        padded[lower_vector_reflect_slices_pad] *= -1
                 case _:
                     raise Exception("Unimplemented BC")
             match right_bc:
@@ -228,8 +288,9 @@ class SimulationState:
                 case BoundaryCondition.REFLECTIVE:
                     # Initially assign like zero grad ( takes care of scalars)
                     padded[upper_slice] = padded[upper_zero_grad_slices]
-                    # For vectors, need to flip sign
-                    padded[upper_vector_reflect_slices_pad] *= -1
+                    if(has_vector_components):
+                        # For vectors, need to flip sign
+                        padded[upper_vector_reflect_slices_pad] *= -1
                 case _:
                     raise Exception("Unimplemented BC")
         return padded
@@ -238,9 +299,9 @@ class SimulationState:
         # Returns the time step needed, the change in the conservative variables, and the recovered primitives of the system prior to stepping
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
-                U_padded_cart = self.pad_unweighted_array(U_cart, WhichVar.CONSERVATIVE)
+                U_padded_cart = self.pad_array(U_cart, self.U_initial_unweighted_padded, VariableSet.CONSERVATIVE)
                 W_cart = self.conservative_to_primitive(U_padded_cart)
-                W_padded_cart = self.pad_unweighted_array(W_cart, WhichVar.PRIMITIVE)
+                W_padded_cart = self.pad_array(W_cart, self.W_initial_unweighted_padded, VariableSet.PRIMITIVE)
                 assert(W_padded_cart.shape == U_padded_cart.shape)
                 possible_dt = []
                 state_update = np.zeros(U_cart.shape)
@@ -248,12 +309,22 @@ class SimulationState:
                     axes = tuple(range(self.n_variable_dimensions))
                 else:
                     axes = which_axis
-                density_flux = self.density_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
-                tau_flux = self.tau_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
-                momentum_flux_tensor = self.momentum_flux_tensor(U_padded_cart,W_padded_cart, WeightType.CENTER)
+                density_flux_padded = self.density_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
+                tau_flux_padded = self.tau_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
+                momentum_flux_tensor_padded = self.momentum_flux_tensor(U_padded_cart,W_padded_cart, WeightType.CENTER)
+                v_mag_2 = self.metric.three_vector_mag(W_cart[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
+                alpha = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array 
+                beta = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.BETA,  WeightType.CENTER, self.simulation_params).array
+                inv_metric =  self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
+
+                v_mag_2_fixed_current_padded = self.pad_array(v_mag_2, self.v_mag2_fixed_padded, VariableSet.VECTOR)
+                alpha_padded = self.pad_array( alpha, self.alpha_fixed_padded, VariableSet.SCALAR)
+                beta_padded = self.pad_array( beta, self.inverse_beta_fixed_padded, VariableSet.VECTOR)
+                inverse_metric_padded = self.pad_array(inv_metric , self.inverse_metric_fixed_padded, VariableSet.METRIC) #  NOTE: Going to treat metric as a scalar. Don't know how matrices should reflect...
                 for dim in axes:
                     flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart,
-                                                                                   density_flux, momentum_flux_tensor, tau_flux,
+                                                                                   density_flux_padded, momentum_flux_tensor_padded, tau_flux_padded,
+                                                                                   v_mag_2_fixed_current_padded,alpha_padded, inverse_metric_padded, beta_padded,
                                                                                        dim)
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
@@ -271,11 +342,8 @@ class SimulationState:
     
     def shift_three_velocity_padded(self, three_velocities_padded: npt.ArrayLike) -> npt.NDArray:
         shift_vec = self.metric.shift_vector(self.grid_info, self.simulation_params)
-        padding = self.simulation_params.spatial_integration.pad_width()
-        system_variable_padding = [(padding,padding)]*(shift_vec.ndim-1)
-        pad_width = system_variable_padding + [(0,0)] # No padding along variable index
-        shift_vec_padded = np.pad(shift_vec, pad_width, "edge")
-        return three_velocities_padded - shift_vec_padded
+        shift_vec_padded = self.pad_array(shift_vec, self.shifted_velocity_fixed_padding, VariableSet.VECTOR)
+        return three_velocities_padded - shift_vec_padded.T
 
     def density_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index)
@@ -302,16 +370,18 @@ class SimulationState:
         shifted_velocity = self.shift_three_velocity_padded(W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value:])
         return (Tau.T*shifted_velocity.T+ pressure.T*velocity.T).T
 
-    def spatial_derivative(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
-                           density_flux: npt.ArrayLike, momentum_flux_tensor: npt.ArrayLike, tau_flux: npt.ArrayLike,
+    def spatial_derivative(self, 
+                           U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
+                           density_flux_padded: npt.ArrayLike, momentum_flux_tensor_padded: npt.ArrayLike, tau_flux_padded: npt.ArrayLike,
+                           v_mag_2_padded: npt.ArrayLike, alpha_padded: npt.ArrayLike, inverse_metric_padded: npt.ArrayLike, beta_padded: npt.ArrayLike,
                              spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
         # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        zero  =  density_flux[...,spatial_index]
+        zero  =  density_flux_padded[...,spatial_index]
         target = [*zero.shape]+[1]
         zero = zero.reshape(target)
-        first  = tau_flux[...,spatial_index]
+        first  = tau_flux_padded[...,spatial_index]
         first = first.reshape(target)
-        rest  = momentum_flux_tensor[...,spatial_index,:]
+        rest  = momentum_flux_tensor_padded[...,spatial_index,:]
         cell_flux = np.concatenate(
             [
                 zero,
@@ -319,7 +389,29 @@ class SimulationState:
                 rest
             ], 
             axis=-1)
-        alpha_minus, alpha_plus = self.alpha_plus_minus(W_padded_cart)
+        pressure = index_primitive_var(W_padded_cart, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
+        density = index_primitive_var(W_padded_cart, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
+        c_s = sound_speed(self.simulation_params,pressure, density)    
+        match self.simulation_params.regime:
+            case WhichRegime.NEWTONIAN:
+                lambda_plus = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value+spatial_index]+c_s
+                lambda_minus = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value+spatial_index]-c_s
+                alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus)
+            case WhichRegime.RELATIVITY:
+                # Eq. 22 of https://iopscience.iop.org/article/10.1086/303604/pdf
+                beta_component = beta_padded[spatial_index,...]
+                gamma_ii = inverse_metric_padded[METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,...] 
+                velocity_component = W_padded_cart[...,PrimitiveIndex.X_VELOCITY.value+spatial_index]
+                cs_2 = np.power(c_s,2)
+                factor_1 = 1-v_mag_2_padded*cs_2
+                factor_2 = 1-v_mag_2_padded 
+                factor_3 = 1-cs_2
+                prefactor = alpha_padded/factor_1
+                common_factor = velocity_component*factor_3
+                discriminant = factor_2*(gamma_ii*factor_1-np.power(velocity_component,2)*factor_3)
+                lambda_plus = prefactor*(common_factor + np.sqrt(discriminant)) - beta_component
+                lambda_minus = prefactor*(common_factor - np.sqrt(discriminant)) - beta_component
+                alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus)
         alpha_sum = alpha_minus+alpha_plus
         assert(np.all(alpha_sum != 0))
         alpha_prod = alpha_minus*alpha_plus
@@ -349,12 +441,7 @@ class SimulationState:
         cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_minus_half].T
         return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta(spatial_index)[spatial_index], alpha_plus, alpha_minus
 
-    def alpha_plus_minus(self, primitives: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        pressure = index_primitive_var(primitives, PrimitiveIndex.PRESSURE,self.n_variable_dimensions)
-        density = index_primitive_var(primitives, PrimitiveIndex.DENSITY,self.n_variable_dimensions)
-        c_s = sound_speed(self.simulation_params,pressure, density)
-        lambda_plus = primitives[...,PrimitiveIndex.X_VELOCITY.value]+c_s
-        lambda_minus = primitives[...,PrimitiveIndex.X_VELOCITY.value]-c_s
+    def alpha_plus_minus(self, lambda_plus: npt.ArrayLike, lambda_minus: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         # We have two lists of sounds speeds in the left and right cells. Do MAX(0, left, right) for + and MAX(0,-left, -right) for - 
         zeros_shape = [dim-2 for dim in lambda_plus.shape]
         zeros = np.zeros(zeros_shape)
