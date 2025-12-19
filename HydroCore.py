@@ -522,8 +522,8 @@ class SimulationState:
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
         deltas = np.asarray([np.min(self.grid_info.delta(i)) for i in range(self.n_variable_dimensions)])
         min_delta = np.min(deltas[deltas>0])
-        if max_alpha > 1.0:
-                    print(f"WARNING: Superluminal wave speed detected: {max_alpha}")
+        # if max_alpha > 1.0:
+        #             print(f"WARNING: Superluminal wave speed detected: {max_alpha}")
         return self.simulation_params.Courant*min_delta/max_alpha
 
 

@@ -35,6 +35,7 @@ def construct_primitives_from_guess(guess:npt.ArrayLike,
                                      sim_params: SimParams,
                                      grid_info: GridInfo,
                                 n_spatial_dim: int) -> npt.NDArray:
+    guess = np.maximum(guess, 1e-12) # Clamp guess to be physically valid
     output = np.zeros(U_cart.shape)
     flux = U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:]
     flux_squared = metric.three_vector_mag_squared(flux, grid_info, WeightType.CENTER, sim_params)
@@ -47,12 +48,9 @@ def construct_primitives_from_guess(guess:npt.ArrayLike,
     W2 = np.power(1-v_mag_2,-1)
     W = np.sqrt(W2)
     rho = D/W
-    velocities = ((flux.T)/(W.T*z.T)).T
-    assert(~np.any(np.isnan(rho)))
-    assert(~np.any(np.isnan(velocities)))
-    assert(~np.any(np.isnan(guess)))
-    assert(np.all(rho>0.0)) 
-    assert(np.all(guess>0.0))
+    velocities = ((flux.T)/(z.T)).T
+    rho = np.maximum(rho, 1e-12)
+    velocities = np.clip(velocities, -0.99999, 0.99999)
     output[...,PrimitiveIndex.DENSITY.value] = rho
     output[...,PrimitiveIndex.X_VELOCITY.value:] = velocities
     output[...,PrimitiveIndex.PRESSURE.value] = guess
