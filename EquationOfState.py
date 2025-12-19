@@ -15,7 +15,6 @@ def sound_speed(simulation_params: SimParams, pressure: npt.ArrayLike, density: 
         case WhichRegime.RELATIVITY:
             h = internal_enthalpy_primitive_raws(pressure,density,simulation_params)
             return np.sqrt(simulation_params.gamma* pressure / density/h)
-            # return np.sqrt(simulation_params.gamma* pressure / density) # NOTE: TEmporary
         case WhichRegime.NEWTONIAN:
             return np.sqrt(simulation_params.gamma* pressure / density)
     return 

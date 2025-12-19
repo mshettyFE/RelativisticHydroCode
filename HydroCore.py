@@ -36,9 +36,8 @@ class SimulationState:
         self.bcm = a_bcm
         self.metric = a_metric
         U_unweighted_initial = self.primitive_to_conservative(primitive_tensor) 
-        padding = self.simulation_params.spatial_integration.pad_width()
          # No padding along variable index
-        v_mag_2_fixed = self.metric.three_vector_mag(self.primitive_previous[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
+        v_mag_2_fixed = self.metric.three_vector_mag_squared(self.primitive_previous[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
         shifted_velocity_fixed = self.metric.shift_vector(self.grid_info, self.simulation_params)
         alpha_fixed = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array
         inverse_metric_fixed = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
@@ -123,7 +122,9 @@ class SimulationState:
             case WhichRegime.RELATIVITY:
                 args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
                 initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
-                recovered_guess = newton(root_finding_func, initial_guess,args = args)
+                initial_guess = np.maximum(initial_guess, 1e-10)
+                recovered_guess, converge, zero_er = newton(root_finding_func, initial_guess,args = args, full_output=True)
+                assert(np.all(converge))
                 out = construct_primitives_from_guess(recovered_guess, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
                 return out
             case _:
@@ -312,7 +313,7 @@ class SimulationState:
                 density_flux_padded = self.density_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
                 tau_flux_padded = self.tau_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
                 momentum_flux_tensor_padded = self.momentum_flux_tensor(U_padded_cart,W_padded_cart, WeightType.CENTER)
-                v_mag_2 = self.metric.three_vector_mag(W_cart[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
+                v_mag_2 = self.metric.three_vector_mag_squared(W_cart[...,PrimitiveIndex.X_VELOCITY.value:], self.grid_info, WeightType.CENTER, self.simulation_params)
                 alpha = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array 
                 beta = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.BETA,  WeightType.CENTER, self.simulation_params).array
                 inv_metric =  self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
@@ -324,7 +325,7 @@ class SimulationState:
                 for dim in axes:
                     flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart,
                                                                                    density_flux_padded, momentum_flux_tensor_padded, tau_flux_padded,
-                                                                                   v_mag_2_fixed_current_padded,alpha_padded, inverse_metric_padded, beta_padded,
+                                                                                   v_mag_2_fixed_current_padded,alpha_padded, inverse_metric_padded, beta_padded,   
                                                                                        dim)
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
@@ -409,45 +410,39 @@ class SimulationState:
                 prefactor = alpha_padded/factor_1
                 common_factor = velocity_component*factor_3
                 discriminant = factor_2*(gamma_ii*factor_1-np.power(velocity_component,2)*factor_3)
-                lambda_plus = prefactor*(common_factor + np.sqrt(discriminant)) - beta_component
-                lambda_minus = prefactor*(common_factor - np.sqrt(discriminant)) - beta_component
+                lambda_plus = prefactor*(common_factor + c_s*np.sqrt(discriminant)) - beta_component
+                lambda_minus = prefactor*(common_factor - c_s*np.sqrt(discriminant)) - beta_component
                 alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus)
+                assert(alpha_minus.shape == alpha_plus.shape)
         alpha_sum = alpha_minus+alpha_plus
         assert(np.all(alpha_sum != 0))
         alpha_prod = alpha_minus*alpha_plus
-        # Bunch of .T because numpy broadcasting rules
-        slices_left_plus = tuple([slice(1,-1,None)]*self.n_variable_dimensions)
-        slices_right_plus = tuple([slice(2,None,None)]*self.n_variable_dimensions)
-        slices_left_minus = tuple([slice(None,-2,None)]*self.n_variable_dimensions)
-        slices_right_minus = tuple([slice(1,-1,None)]*self.n_variable_dimensions)
-        left_cell_flux_plus = cell_flux[slices_left_plus].T 
-        left_conserve_plus = U_padded_cart[slices_left_plus].T
-        right_cell_flux_plus =cell_flux[slices_right_plus].T  
-        right_conserve_plus = U_padded_cart[slices_right_plus].T
-        left_cell_flux_minus = cell_flux[slices_left_minus].T 
-        left_conserve_minus = U_padded_cart[slices_left_minus].T
-        right_cell_flux_minus =cell_flux[slices_right_minus].T  
-        right_conserve_minus = U_padded_cart[slices_right_minus].T
-        cell_flux_plus_half = (alpha_plus.T*left_cell_flux_plus+ alpha_minus.T*right_cell_flux_plus
-                               -alpha_prod.T*(right_conserve_plus -left_conserve_plus))/alpha_sum.T
-        cell_flux_minus_half = (alpha_plus.T*left_cell_flux_minus+ alpha_minus.T*right_cell_flux_minus
-                                -alpha_prod.T*(right_conserve_minus-left_conserve_minus))/alpha_sum.T
-        weights = self.metric.cell_weights(self.grid_info, WeightType.EDGE, self.simulation_params) 
-        slices_plus_half = [slice(1,None, None)]*weights.ndim
-        slices_plus_half = tuple(slices_plus_half)
-        slices_minus_half = [slice(None,-1, None)]*weights.ndim
-        slices_minus_half = tuple(slices_minus_half)
-        cell_flux_plus_half_rescaled = cell_flux_plus_half* weights[slices_plus_half].T
-        cell_flux_minus_half_rescaled = cell_flux_minus_half* weights[slices_minus_half].T
-        return -(cell_flux_plus_half_rescaled.T-cell_flux_minus_half_rescaled.T)/self.grid_info.delta(spatial_index)[spatial_index], alpha_plus, alpha_minus
+        slices_left = [slice(0,-1,None)]*cell_flux.ndim
+        slices_left[-1] = slice(None,None,None) # Select all variables
+        slices_left = tuple(slices_left)
+        slices_right = [slice(1,None,None)]*cell_flux.ndim
+        slices_right[-1] = slice(None,None,None) # Select all variables
+        slices_right = tuple(slices_right)
+        cell_flux_left = cell_flux[slices_left]
+        conserve_left = U_padded_cart[slices_left]
+        cell_flux_right = cell_flux[slices_right]
+        conserve_right = U_padded_cart[slices_right]
+        flux_interface = ((alpha_plus * cell_flux_left.T + alpha_minus * cell_flux_right.T
+                      - alpha_prod * (conserve_right.T - conserve_left.T)) / (alpha_sum)).T
+        weights = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.DETERMINANT, WeightType.EDGE, self.simulation_params).array
+        flux_densitized = (flux_interface.T * weights.T).T
+        flux_interface_left = flux_densitized[slices_left]
+        flux_interface_right = flux_densitized[slices_right]
+        out = (flux_interface_right - flux_interface_left)/self.grid_info.delta(spatial_index)[spatial_index]
+        return out , alpha_plus, alpha_minus
 
     def alpha_plus_minus(self, lambda_plus: npt.ArrayLike, lambda_minus: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         # We have two lists of sounds speeds in the left and right cells. Do MAX(0, left, right) for + and MAX(0,-left, -right) for - 
-        zeros_shape = [dim-2 for dim in lambda_plus.shape]
+        zeros_shape = [dim-1 for dim in lambda_plus.shape]
         zeros = np.zeros(zeros_shape)
         # Grab the left and right speeds from the padded array
-        slices_left = tuple([slice(None,-2,None)]*self.n_variable_dimensions)
-        slices_right = tuple([slice(2,None,None)]*self.n_variable_dimensions)
+        slices_left = tuple([slice(0,-1,None)]*self.n_variable_dimensions)
+        slices_right = tuple([slice(1,None,None)]*self.n_variable_dimensions)
         lambda_plus_left = lambda_plus[slices_left]
         lambda_plus_right = lambda_plus[slices_right]
         lambda_minus_left = lambda_minus[slices_left]
@@ -527,18 +522,9 @@ class SimulationState:
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
         deltas = np.asarray([np.min(self.grid_info.delta(i)) for i in range(self.n_variable_dimensions)])
         min_delta = np.min(deltas[deltas>0])
+        if max_alpha > 1.0:
+                    print(f"WARNING: Superluminal wave speed detected: {max_alpha}")
         return self.simulation_params.Courant*min_delta/max_alpha
-
-# def minmod(x: npt.ArrayLike, y: npt.ArrayLike, z: npt.ArrayLike):
-#     sgn_x = np.sign(x)
-#     sgn_y = np.sign(y)
-#     sgn_z = np.sign(z)
-#     min_candidates = np.min(np.abs(np.stack([x,y,z], axis=1)), axis=1)
-#     output = (1/4)*np.abs(sgn_x+sgn_y)*(sgn_x+sgn_z)*min_candidates
-#     assert(output.shape == x.shape)
-#     return output
-#
-
 
 
 if __name__ == "__main__":

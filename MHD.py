@@ -31,7 +31,7 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                             relativistic: WhichRegime = WhichRegime.NEWTONIAN) -> SimulationState:
     grid_info = GridInfo(np.array([0.0]), np.array([1.0]), np.array([N_cells]), scalings=[Scaling.LINEAR])
     spatial_update = SpatialUpdate(SpatialUpdateType.FLAT, {})
-    simulation_params = SimParams(1.4, 0.5, t_max, 1.0,
+    simulation_params = SimParams(Gamma, Courant, t_max, 1.0,
                                   include_source=False, time_integration=TimeUpdateType.RK3,
                                     spatial_integration=spatial_update, regime=relativistic)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
@@ -97,12 +97,18 @@ def runSim1D(which_sim: Which1DTestProblem):
         case Which1DTestProblem.CARTESIAN_SOD:
             save_frequency = 1
             which_axes = ()
-            state_sim =  SodShockInitialization(1.0,0.0,1.0, 0.1, 0.0, 0.125, Courant=0.5, Gamma=1.4, N_cells=1000, t_max=0.1) 
+            state_sim =  SodShockInitialization(
+                rho_l=1.0, v_l=0.0, P_l=1.0,
+                rho_r=0.125, v_r=0.0, P_r=0.1,
+               Courant=0.5, Gamma=1.4, N_cells=1000, t_max=0.1) 
         case Which1DTestProblem.SR_CARTESIAN_SOD:
-            save_frequency = 1
+            save_frequency = 100
             which_axes = ()
-            state_sim =  SodShockInitialization(10.0,0.0,1.0, 40/3, 0.0, 2/3*1E-6, Courant=0.5, Gamma=5/3,
-                                                 N_cells=1000, t_max=0.7, relativistic=WhichRegime.RELATIVITY) 
+            state_sim =  SodShockInitialization(
+                rho_l=10.0, v_l=0.0, P_l=40/3,
+                rho_r=1, v_r=0.0, P_r=2/3*1E-6,
+                 Courant=0.5, Gamma=5/3,
+                                                 N_cells=10000, t_max=.36, relativistic=WhichRegime.RELATIVITY) 
         case Which1DTestProblem.HARDER_SOD:
             save_frequency = 100
             which_axes = ()

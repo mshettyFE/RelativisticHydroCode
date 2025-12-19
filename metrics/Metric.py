@@ -214,7 +214,7 @@ class Metric(ABC):
         weights = self.cell_weights(grid_info, weight_type, sim_params)
         return (U.T/weights.T).T
     
-    def three_vector_mag(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+    def three_vector_mag_squared(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
@@ -227,7 +227,7 @@ class Metric(ABC):
     
     def W(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
-        v2_mag  = self.three_vector_mag(three_velocities, grid_info, weight_type, sim_params)
+        v2_mag  = self.three_vector_mag_squared(three_velocities, grid_info, weight_type, sim_params)
         np.clip(v2_mag, 0, 1.0 - 1e-14, out=v2_mag)
         inter =1-v2_mag
 #        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
