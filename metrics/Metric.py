@@ -178,20 +178,19 @@ class Metric(ABC):
 
     def weight_system(self, U_cart: npt.ArrayLike, grid_info: GridInfo, weight_type: WeightType, sim_params: SimParams):
         weights = self.cell_weights(grid_info, weight_type, sim_params)
-        return (weights.T * U_cart.T).T
+        return weights * U_cart
     
     def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType, sim_params: SimParams):
         weights = self.cell_weights(grid_info, weight_type, sim_params)
-        return (U.T/weights.T).T
+        return U/weights
     
     def three_vector_mag_squared(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
         metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
         dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
         grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
         index = tuple(dim_slice+grid_slice)
-        spatial_metric = np.einsum("ij...->...ij",metric[index]) 
-        right = np.matvec(spatial_metric, vec) # Sum over last index. Size is (gridsize, dim)
-        output = np.vecdot(vec, right)
+        spatial_metric = metric[index]
+        output = np.einsum("ij...,i...,j...->...", spatial_metric, vec, vec)
         return output
         # return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
     

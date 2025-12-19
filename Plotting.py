@@ -24,9 +24,7 @@ def plot_results_1D(
     with open(input_pkl_file, 'rb') as f:
         history, sim_state = pkl.load(f)
     sim_state.metric.sanity_check(sim_state.grid_info, sim_state.simulation_params)
-    N = history[0][1].shape[0]
     support = sim_state.grid_info.construct_grid_centers(0)
-    assert(N==support.shape[0])
 
     if(show_mach):
         fig, axes = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
@@ -115,7 +113,7 @@ def plot_2D_anim(
     grid_centers_x = last_state.grid_info.construct_grid_centers(0)
     grid_centers_y = last_state.grid_info.construct_grid_centers(1)
     xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
-    quad = ax.pcolormesh(xx, yy, plot_var.T, shading='auto', cmap='viridis', norm=colors.LogNorm(vmin=vmin, vmax=vmax))
+    quad = ax.pcolormesh(xx, yy, plot_var, shading='auto', cmap='viridis', norm=colors.LogNorm(vmin=vmin, vmax=vmax))
     fig.colorbar(quad, ax=ax)
     ax.set_title(f"t = {data[0][0]:.3f}")
 

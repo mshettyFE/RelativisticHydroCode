@@ -35,19 +35,19 @@ def SodShockInitialization(rho_l: np.float64, v_l: np.float64, P_l: np.float64,
                                     spatial_integration=spatial_update, regime=relativistic)
     bcm = BoundaryConditionManager([BoundaryCondition.ZERO_GRAD], [BoundaryCondition.ZERO_GRAD])
     grid_shape = grid_info.NCells
-    primitives = np.zeros( list(grid_shape)+[3]  ) 
+    primitives = np.zeros([3]+ list(grid_shape)  ) 
     assert(primitives.ndim==2)
     metric = CartesianMinkowski_1_1(grid_info, simulation_params)
     assert(metric.dimension==2) # 1+1 
     grid_centers = grid_info.construct_grid_centers(0)
     lower_half = grid_centers<0.5 
     upper_half = grid_centers>=0.5
-    primitives[lower_half, PrimitiveIndex.DENSITY.value] = rho_l
-    primitives[lower_half, PrimitiveIndex.PRESSURE.value] = P_l
-    primitives[lower_half, PrimitiveIndex.X_VELOCITY.value] = v_l
-    primitives[upper_half, PrimitiveIndex.DENSITY.value] = rho_r
-    primitives[upper_half, PrimitiveIndex.PRESSURE.value] = P_r
-    primitives[upper_half, PrimitiveIndex.X_VELOCITY.value] = v_r
+    primitives[PrimitiveIndex.DENSITY.value,lower_half] = rho_l
+    primitives[ PrimitiveIndex.PRESSURE.value, lower_half] = P_l
+    primitives[PrimitiveIndex.X_VELOCITY.value, lower_half] = v_l
+    primitives[ PrimitiveIndex.DENSITY.value, upper_half] = rho_r
+    primitives[PrimitiveIndex.PRESSURE.value, upper_half] = P_r
+    primitives[PrimitiveIndex.X_VELOCITY.value, upper_half] = v_r
     return SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
     )
@@ -68,12 +68,12 @@ def BondiAccretionInitialization(
         [BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD], [BoundaryCondition.FIXED,BoundaryCondition.ZERO_GRAD,BoundaryCondition.ZERO_GRAD]
         )
     grid_shape = grid_info.NCells
-    primitives = np.zeros( list(grid_shape)+[5]  ) 
-    primitives[..., PrimitiveIndex.DENSITY.value] = rho
-    primitives[..., PrimitiveIndex.X_VELOCITY.value] = v # r
-    primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0 # theta
-    primitives[..., PrimitiveIndex.Z_VELOCITY.value] = 0 # phi
-    primitives[..., PrimitiveIndex.PRESSURE.value] = P
+    primitives = np.zeros( [5]+list(grid_shape)  ) 
+    primitives[PrimitiveIndex.DENSITY.value,...] = rho
+    primitives[PrimitiveIndex.X_VELOCITY.value,...] = v # r
+    primitives[PrimitiveIndex.Y_VELOCITY.value,...] = 0 # theta
+    primitives[PrimitiveIndex.Z_VELOCITY.value,...] = 0 # phi
+    primitives[PrimitiveIndex.PRESSURE.value,...] = P
     metric = SphericalMinkowski_1_3(grid_info, simulation_params)
     out = SimulationState(
         primitives,grid_info, bcm, simulation_params, metric
@@ -133,15 +133,15 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEW
             )
     xx,yy = grid_info.meshgrid_center
     summed = xx+yy
-    primitives = np.zeros( [*summed.shape]+[4]  ) 
+    primitives = np.zeros([4]+ [*summed.shape]  ) 
     lower = summed < 0.15
     upper = summed >= 0.15 
-    primitives[lower, PrimitiveIndex.DENSITY.value] = 0.125
-    primitives[lower, PrimitiveIndex.PRESSURE.value] = 0.125
-    primitives[upper, PrimitiveIndex.DENSITY.value] = 1.0
-    primitives[upper, PrimitiveIndex.PRESSURE.value] = 1.0
-    primitives[..., PrimitiveIndex.X_VELOCITY.value] = 0
-    primitives[..., PrimitiveIndex.Y_VELOCITY.value] = 0
+    primitives[ PrimitiveIndex.DENSITY.value, lower] = 0.125
+    primitives[PrimitiveIndex.PRESSURE.value, lower] = 0.125
+    primitives[ PrimitiveIndex.DENSITY.value, upper] = 1.0
+    primitives[ PrimitiveIndex.PRESSURE.value, upper] = 1.0
+    primitives[PrimitiveIndex.X_VELOCITY.value,...] = 0
+    primitives[PrimitiveIndex.Y_VELOCITY.value,...] = 0
     metric = CartesianMinkowski_1_2(grid_info, simulation_params)
     assert(metric.dimension==3) # 1+2 
     return SimulationState(
@@ -177,13 +177,13 @@ if __name__ == "__main__":
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
     # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
     # Plotting.plot_results_1D()
-    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
-    # Plotting.plot_results_1D()
+    runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    Plotting.plot_results_1D()
     # # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
     # Plotting.plot_2D_anim()
-    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+    # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
     # Plotting.plot_2D_anim()

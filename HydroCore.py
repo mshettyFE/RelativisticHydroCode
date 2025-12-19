@@ -26,7 +26,7 @@ class SimulationState:
         assert(n_variable_dimensions == len(a_bcm.left_bcs))
         self.n_variable_dimensions = n_variable_dimensions 
         assert(primitive_tensor.ndim == (n_variable_dimensions+1)) # +1 from the variable index
-        n_variables = primitive_tensor.shape[-1] # Assuming that variables are the last index 
+        n_variables = primitive_tensor.shape[0] # Assuming that variables are the first index
         assert(n_variables >=3) # Need density, at least 1 velocity, and pressure 
         assert(n_variables-2==n_variable_dimensions) # Number of velocities should equal the spatial dimension
         self.last_primitive_velocity_index = self.ending_primitive_velocity_index()
@@ -58,7 +58,7 @@ class SimulationState:
         self.U = self.metric.weight_system(U_unweighted_initial,  self.grid_info, WeightType.CENTER, self.simulation_params)
         self.current_time = starting_time
         # Purely spatial dirac delta field for flux tensor calculation
-        spatial_dims = [self.n_variable_dimensions]*2+[*self.U_initial_unweighted_padded[...,0].shape]
+        spatial_dims = [self.n_variable_dimensions]*2+[*self.U_initial_unweighted_padded[0,...].shape]
         self.dirac_delta_constant = np.zeros(spatial_dims) ## (grisize, spatial, spatial)
         for i in range(self.n_variable_dimensions):
             self.dirac_delta_constant [i,i,...] = 1
@@ -95,7 +95,7 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented simulation dimension")
         assert(start_var_type.value <= max_allowed_index.value)
-        return U_cart[...,start_var_type.value]
+        return U_cart[start_var_type.value,...]
     
     def set_conservative_var(self, U_cart: npt.ArrayLike, start_var_type: ConservativeIndex, new_values: npt.ArrayLike):
         match self.n_variable_dimensions:
@@ -109,19 +109,19 @@ class SimulationState:
                 raise Exception("Unimplemented simulation dimension")
         assert(start_var_type.value <= max_allowed_index.value)
         if(new_values.shape[0]==1):
-            assert (U_cart[...,start_var_type.value].shape[0]== new_values.shape[1])
+            assert (U_cart[start_var_type.value,...].shape[0]== new_values.shape[1])
         else:
-            assert(U_cart[...,start_var_type.value].shape == new_values.shape)
-        U_cart[...,start_var_type.value] = new_values
+            assert(U_cart[start_var_type.value,...].shape == new_values.shape)
+        U_cart[start_var_type.value,...] = new_values
         return True
 
     def get_momentum_fluxes(self, U_cart: npt.ArrayLike):
         # Assumes momenta are contiguous in the conservative variable array
-        return U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1]
+        return U_cart[ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1,...]
     
     def set_momentum_fluxes(self, U_cart: npt.ArrayLike, new_values: npt.ArrayLike):
-        assert(U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1].shape == new_values.shape)
-        U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1] = new_values
+        assert(U_cart[ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1,...].shape == new_values.shape)
+        U_cart[ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value+1,...] = new_values
         return True
     
     def get_specific_momentum_flux(self, U_cart: npt.ArrayLike, axis: int):
@@ -142,7 +142,7 @@ class SimulationState:
         assert(axis in axis_to_index_map.keys())
         target_index = axis_to_index_map[axis]
         assert(target_index <= max_allowed_index.value)
-        return U_cart[...,target_index]
+        return U_cart[target_index,...]
     
     def get_primitive_var(self,  primitive: npt.NDArray, start_var_type: PrimitiveIndex):
         match self.n_variable_dimensions:
@@ -155,11 +155,11 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented simulation dimension")
         assert(start_var_type.value <= max_allowed_index.value)
-        return primitive[...,start_var_type.value]
+        return primitive[start_var_type.value,...]
 
     def get_velocities(self, primitive: npt.ArrayLike):
         # Assumes velocities are contiguous in the primitive variable array
-        return primitive[...,PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1]
+        return primitive[PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1,...]
 
     def get_specific_velocity(self, primitive: npt.ArrayLike, axis: int):
         match self.n_variable_dimensions:
@@ -179,7 +179,7 @@ class SimulationState:
         assert(axis in axis_to_index_map.keys())
         target_index = axis_to_index_map[axis]
         assert(target_index <= max_allowed_index.value)
-        return primitive[...,target_index]
+        return primitive[target_index,...]
 
     def set_primitive_var(self, primitive: npt.ArrayLike, start_var_type: PrimitiveIndex, new_values: npt.ArrayLike):
         match self.n_variable_dimensions:
@@ -192,13 +192,13 @@ class SimulationState:
             case _:
                 raise Exception("Unimplemented simulation dimension")
         assert(start_var_type.value <= max_allowed_index.value)
-        assert(primitive[...,start_var_type.value].shape == new_values.shape)
-        primitive[...,start_var_type.value] = new_values
+        assert(primitive[start_var_type.value,...].shape == new_values.shape)
+        primitive[start_var_type.value,...] = new_values
         return True
     
     def set_velocities(self, primitive: npt.ArrayLike, new_values: npt.ArrayLike):
-        assert(primitive[...,PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1].shape == new_values.shape)
-        primitive[...,PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1] = new_values
+        assert(primitive[PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1,...].shape == new_values.shape)
+        primitive[PrimitiveIndex.X_VELOCITY.value:self.last_primitive_velocity_index.value+1,...] = new_values
         return True
 
     def primitive_to_conservative(self, W: npt.ArrayLike, weight_type: WeightType = WeightType.CENTER ) -> npt.NDArray[np.float64]:
@@ -209,11 +209,12 @@ class SimulationState:
             case WhichRegime.NEWTONIAN:
                 velocities = self.get_velocities(W)                
                 velocities_squared = np.power(velocities,2)
-                v_mag_2 = np.sum(velocities_squared, axis=tuple(range(PrimitiveIndex.X_VELOCITY.value, self.last_primitive_velocity_index.value))).T
+                v_mag_2 = np.sum(velocities_squared, axis=0)
                 tau = rho* equation_of_state_primitive(self.simulation_params, pressure, rho)+0.5*rho*v_mag_2
                 self.set_conservative_var(output,ConservativeIndex.DENSITY,rho)
                 self.set_conservative_var(output,ConservativeIndex.TAU, tau)
-                fluxes = (rho.T*velocities.T).T
+                first = rho*velocities
+                fluxes = first*velocities
                 self.set_momentum_fluxes(output, fluxes)
             case WhichRegime.RELATIVITY:
                 enthalpy = self.internal_enthalpy_primitive(W, self.simulation_params)
@@ -224,7 +225,7 @@ class SimulationState:
                 self.set_conservative_var(output,ConservativeIndex.DENSITY, D)
                 self.set_conservative_var(output,ConservativeIndex.TAU, rho*enthalpy*np.power(boost,2)-pressure-D )
                 first = rho*enthalpy*np.power(boost,2)
-                fluxes = (first.T *velocities.T).T
+                fluxes = first*velocities
                 self.set_momentum_fluxes(output, fluxes)
             case _:
                 raise Exception("Unimplemented relativistic regime")
@@ -237,38 +238,40 @@ class SimulationState:
         # Returns primitive array without any of the ghost cells  since that would require rewriting a bunch of the Metric class stuff that is too much of a pain
         # NOTE: Make sure that you pad the output appropriately
          # Remove ghost cells from padded grid
-        slices = [slice(1,-1, None)]*(U_cart_padded.ndim-1)
-        slices += [slice(None)] # Select all of the variables 
+        slices = [slice(1,-1, None)]*(U_cart_padded.ndim)
+        exclude_axes = self.excluded_padding_axes(U_cart_padded, VariableSet.CONSERVATIVE)
+        for axis in exclude_axes:
+            slices[axis] = slice(None) 
         slices = tuple(slices)
-        U_cart_padded  = U_cart_padded[slices]
+        U_cart  = U_cart_padded[slices]
         match self.simulation_params.regime:
             case WhichRegime.NEWTONIAN:
-                output = np.zeros(U_cart_padded.shape)
-                rho = self.get_conservative_var(U_cart_padded,ConservativeIndex.DENSITY)
+                output = np.zeros(U_cart.shape)
+                rho = self.get_conservative_var(U_cart,ConservativeIndex.DENSITY)
                 assert(np.all(rho!=0))
-                flux = self.get_momentum_fluxes(U_cart_padded)
-                velocities = (flux.T/rho.T).T
+                flux = self.get_momentum_fluxes(U_cart)
+                velocities = flux/rho
                 velocities_squared = np.power(velocities,2)
-                v_mag_2 = np.sum(velocities_squared, axis=-1).T
-                E = self.get_conservative_var(U_cart_padded, ConservativeIndex.TAU)
+                v_mag_2 = np.sum(velocities_squared, axis=0)
+                E = self.get_conservative_var(U_cart, ConservativeIndex.TAU)
                 unclipped_e =  E/rho-0.5*(v_mag_2)
                 e = np.clip(unclipped_e, a_min=1E-9, a_max=None)
                 assert np.all(e>=0)
                 pressure  = equation_of_state_epsilon(self.simulation_params, e,rho )
-                flux = self.get_momentum_fluxes(U_cart_padded)
-                velocities = (flux.T/rho.T).T
-                output = np.zeros(U_cart_padded.shape)
+                flux = self.get_momentum_fluxes(U_cart)
+                velocities = flux/rho
+                output = np.zeros(U_cart.shape)
                 self.set_primitive_var(output, PrimitiveIndex.DENSITY, rho)
                 self.set_primitive_var(output, PrimitiveIndex.PRESSURE, pressure)
                 self.set_velocities(output, velocities)
                 return output
             case WhichRegime.RELATIVITY:
-                args = (U_cart_padded, self)
+                args = (U_cart, self)
                 initial_guess = self.get_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE)
                 initial_guess = np.maximum(initial_guess, 1e-10)
                 recovered_guess, converge, zero_der = newton(self.root_finding_func, initial_guess,args = args, full_output=True)
                 assert(np.all(converge))
-                out = self.construct_primitives_from_guess(recovered_guess, U_cart_padded)
+                out = self.construct_primitives_from_guess(recovered_guess, U_cart)
                 return out
             case _:
                 raise Exception("Unimplemented relativistic regime")
@@ -307,7 +310,7 @@ class SimulationState:
         W2 = np.power(1-v_mag_2,-1)
         W = np.sqrt(W2)
         rho = D/W
-        velocities = ((flux.T)/(z.T)).T
+        velocities = flux/z
         rho = np.maximum(rho, 1e-12)
         velocities = np.clip(velocities, -0.99999, 0.99999)
         self.set_primitive_var(output, PrimitiveIndex.DENSITY, rho)
@@ -379,7 +382,7 @@ class SimulationState:
     def excluded_padding_axes(self, array: npt.ArrayLike, var_type: VariableSet) -> list:
         match var_type:
             case VariableSet.CONSERVATIVE | VariableSet.PRIMITIVE:
-                return [array.ndim - 1]
+                return [0]
             case VariableSet.VECTOR:
                 return [0] # NOTE: Hack for now since the only vectors have the variable index at the start
             case VariableSet.SCALAR:
@@ -516,8 +519,10 @@ class SimulationState:
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
                 dt = max(possible_dt)
-                slices = [slice(1,-1, None)]*(W_padded_cart.ndim-1) # Remove ghost cells from padded grid
-                slices += [slice(None)] # Select all of the variables 
+                exclude_axes = self.excluded_padding_axes(W_padded_cart, VariableSet.PRIMITIVE)
+                slices = [slice(1,-1, None)]*(W_padded_cart.ndim) # Remove ghost cells from padded grid
+                for axis in exclude_axes:
+                    slices[axis] = slice(None)
                 slices = tuple(slices)
                 primitives = W_padded_cart[slices]
                 if(self.simulation_params.include_source):
@@ -530,14 +535,14 @@ class SimulationState:
     def shift_three_velocity_padded(self, three_velocities_padded: npt.ArrayLike) -> npt.NDArray:
         shift_vec = self.metric.shift_vector(self.grid_info, self.simulation_params)
         shift_vec_padded = self.pad_array(shift_vec, self.shifted_velocity_fixed_padding, VariableSet.VECTOR)
-        return three_velocities_padded - shift_vec_padded.T
+        return three_velocities_padded - shift_vec_padded
 
     def density_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index)
         velocities = self.get_velocities(W_padded_cart)
         shifted_velocity = self.shift_three_velocity_padded(velocities)
         D = self.get_conservative_var(U_padded_cart, ConservativeIndex.DENSITY)
-        return (D.T*shifted_velocity.T).T
+        return D*shifted_velocity
 
     def momentum_flux_tensor(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
         # (gridsize, spatial_index, spatial_index) where the first indexes the coordinate and the 2nd indexes the direction
@@ -546,8 +551,7 @@ class SimulationState:
         pressure = self.get_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE)
         flux = self.get_momentum_fluxes(U_padded_cart)
         pressure_tensor = pressure*self.dirac_delta_constant
-        pressure_tensor = np.einsum("ij...->...ij", pressure_tensor)
-        KE = np.einsum("...i,...j->...ij", flux, shifted_velocity)
+        KE = np.einsum("i...,j...->ij...", flux, shifted_velocity)
         return KE+pressure_tensor
     
     def tau_flux(self, U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, weight_type: WeightType) -> npt.NDArray:
@@ -556,7 +560,7 @@ class SimulationState:
         pressure = self.get_primitive_var(W_padded_cart,PrimitiveIndex.PRESSURE)
         velocities = self.get_velocities(W_padded_cart)
         shifted_velocities = self.shift_three_velocity_padded(velocities)
-        return (Tau.T*shifted_velocities.T+ pressure.T*velocities.T).T
+        return (Tau*shifted_velocities+ pressure*velocities)
 
     def spatial_derivative(self, 
                            U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
@@ -564,19 +568,20 @@ class SimulationState:
                            v_mag_2_padded: npt.ArrayLike, alpha_padded: npt.ArrayLike, inverse_metric_padded: npt.ArrayLike, beta_padded: npt.ArrayLike,
                              spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
         # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        zero  =  density_flux_padded[...,spatial_index]
-        target = [*zero.shape]+[1]
-        zero = zero.reshape(target)
-        first  = tau_flux_padded[...,spatial_index]
-        first = first.reshape(target)
-        rest  = momentum_flux_tensor_padded[...,spatial_index,:]
+        current_density  =  density_flux_padded[spatial_index,...]
+        target = [1]+[*current_density.shape]
+        current_density = np.reshape(current_density, target)
+        tau  = tau_flux_padded[spatial_index,...]
+        target = [1]+[*tau.shape]
+        current_tau = np.reshape(tau, target)
+        current_mom_flux  = momentum_flux_tensor_padded[spatial_index,:,...]
         cell_flux = np.concatenate(
             [
-                zero,
-                first,
-                rest
+                current_density,
+                current_tau,
+                current_mom_flux
             ], 
-            axis=-1)
+            axis=0)
         pressure = self.get_primitive_var(W_padded_cart, PrimitiveIndex.PRESSURE)
         density = self.get_primitive_var(W_padded_cart, PrimitiveIndex.DENSITY)
         c_s = sound_speed(self.simulation_params,pressure, density)    
@@ -603,22 +608,25 @@ class SimulationState:
                 assert(alpha_minus.shape == alpha_plus.shape)
         alpha_sum = alpha_minus+alpha_plus
         assert(np.all(alpha_sum != 0))
+        excluded_axes = self.excluded_padding_axes(U_padded_cart, VariableSet.CONSERVATIVE)
         alpha_prod = alpha_minus*alpha_plus
         slices_left = [slice(0,-1,None)]*cell_flux.ndim
-        slices_left[-1] = slice(None,None,None) # Select all variables
+        for axis in excluded_axes:
+            slices_left[axis] = slice(None,None,None) # Select all variables
         slices_left = tuple(slices_left)
         slices_right = [slice(1,None,None)]*cell_flux.ndim
-        slices_right[-1] = slice(None,None,None) # Select all variables
+        for axis in excluded_axes:
+            slices_right[axis] = slice(None,None,None) 
         slices_right = tuple(slices_right)
         cell_flux_left = cell_flux[slices_left]
         conserve_left = U_padded_cart[slices_left]
         cell_flux_right = cell_flux[slices_right]
         conserve_right = U_padded_cart[slices_right]
-        flux_interface = ((alpha_plus * cell_flux_left.T + alpha_minus * cell_flux_right.T
-                      - alpha_prod * (conserve_right.T - conserve_left.T)) / (alpha_sum)).T
+        flux_interface = (alpha_plus * cell_flux_left + alpha_minus * cell_flux_right
+                      - alpha_prod * (conserve_right - conserve_left)) / (alpha_sum)
  #       flux_densitized = self.metric.weight_system(flux_interface, self.grid_info, WeightType.EDGE, self.simulation_params)
         weights = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.DETERMINANT, WeightType.EDGE, self.simulation_params).array
-        flux_densitized = (flux_interface.T * weights.T).T
+        flux_densitized = flux_interface * weights
         flux_interface_left = flux_densitized[slices_left]
         flux_interface_right = flux_densitized[slices_right]
         out = (flux_interface_right - flux_interface_left)/self.grid_info.delta(spatial_index)[spatial_index]
@@ -652,20 +660,21 @@ class SimulationState:
         four_vel_shape  = [*velocities.shape]
         four_vel_shape[-1]  = four_vel_shape[-1]+1 # Add one for 0 component
         four_velocities  = np.zeros (four_vel_shape)
-        four_velocities[...,0] = 1 # 0th component
+        four_velocities[0,...] = 1 # 0th component
         # First shift the spatial velocities to the current spacelike slice
         shifted_three_velocities = self.metric.shift_three_velocity(velocities, self.grid_info, self.simulation_params)
-        four_velocities[...,1:] = shifted_three_velocities 
+        four_velocities[1:,...] = shifted_three_velocities 
         # Scale by the boost
         alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER, self.simulation_params).array
         W = self.metric.W(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
-        four_velocities[...] = (W.T*four_velocities[...].T).T
+        four_velocities[...] = W*four_velocities[...]
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
         u_u = np.einsum('...k,...l->kl...', four_velocities, four_velocities)
         inv_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
         t_mu_nu_raised = rho*self.internal_enthalpy_primitive(W_cart_unpadded, self.simulation_params)*u_u +pressure*inv_metric
+        assert(0)
         return t_mu_nu_raised
 
     def SourceTerm(self,W:npt.ArrayLike):
@@ -703,7 +712,8 @@ class SimulationState:
         source_flux = source_flux_part_one-source_flux_part_two
         self.set_conservative_var(output,ConservativeIndex.DENSITY, rho_source)
         self.set_conservative_var(output,ConservativeIndex.TAU, energy_source)
-        output[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:self.last_conservative_velocity_index.value] = source_flux[..., METRIC_VARIABLE_INDEX.SPACE_1.value:]
+        self.set_momentum_fluxes(output, source_flux[METRIC_VARIABLE_INDEX.SPACE_1.value:,...])
+        assert(0)
         return output
 
     def calc_dt(self, alpha_plus: npt.ArrayLike, alpha_minus:npt.ArrayLike):
