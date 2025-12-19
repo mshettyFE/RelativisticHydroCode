@@ -128,6 +128,33 @@ def plot_2D_anim(
 
     plt.show()
 
+def plot_1D_anim(
+    input_pkl_file: str = "snapshot.pkl"   
+        ):
+    with open(input_pkl_file, 'rb') as f:
+        data, last_state = pkl.load(f)
+ 
+    fig, ax = plt.subplots()
+
+    # Initialize image using the first array
+    t0, Z0 = data[0]
+    plot_var = Z0[0,...]
+    grid_centers_x = last_state.grid_info.construct_grid_centers(0)
+    line , = ax.plot(grid_centers_x, plot_var)
+    ax.set_title(f"t = {data[0][0]:.3f}")
+    print(len(data))
+
+    def update(frame):
+        t, arr = data[frame]
+        line.set_data(grid_centers_x,arr[0,...].ravel())
+        ax.title.set_text(f"t = {t:.3f}")  
+        return line ,ax.title
+
+    frame_indices = list(range(0, len(data), 100))
+    ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=False)
+
+    plt.show()
+
 def plot_2D(
     input_pkl_file: str = "snapshot.pkl"  ,
     time_slice = -1

@@ -95,13 +95,13 @@ def runSim1D(which_sim: Which1DTestProblem):
                 rho_r=0.125, v_r=0.0, P_r=0.1,
                Courant=0.5, Gamma=1.4, N_cells=1000, t_max=0.1) 
         case Which1DTestProblem.SR_CARTESIAN_SOD:
-            save_frequency = 100
+            save_frequency = 1
             which_axes = ()
             state_sim =  SodShockInitialization(
                 rho_l=10.0, v_l=0.0, P_l=40/3,
                 rho_r=1, v_r=0.0, P_r=2/3*1E-6,
                  Courant=0.5, Gamma=5/3,
-                                                 N_cells=10000, t_max=.36, relativistic=WhichRegime.RELATIVITY) 
+                                                 N_cells=1000, t_max=.36, relativistic=WhichRegime.RELATIVITY) 
         case Which1DTestProblem.HARDER_SOD:
             save_frequency = 100
             which_axes = ()
@@ -155,11 +155,11 @@ class Which2DTestProblem:
 def runSim2D(which_sim: Which2DTestProblem):
     match which_sim:
         case Which2DTestProblem.IMPLOSION_TEST:
-            state_sim = ImplosionInitialization(t_max=.8)            
-            save_frequency = 1
+            state_sim = ImplosionInitialization(t_max=.01)            
+            save_frequency = 10
         case Which2DTestProblem.SR_IMPLOSION_TEST:
             state_sim = ImplosionInitialization(t_max=3, regime=WhichRegime.RELATIVITY)            
-            save_frequency = 1
+            save_frequency = 10
         case _:
             raise Exception("Unimplemented test problem")
     history = []
@@ -178,13 +178,13 @@ if __name__ == "__main__":
     # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
-    # Plotting.plot_results_1D()
+    Plotting.plot_1D_anim("1D_SodShock.pkl")
     # # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
-    # Plotting.plot_2D_anim()
-    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+    # Plotting.plot_2D_anim("high_fidelity_2D.pkl")
+#    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
     # Plotting.plot_2D(time_slice=150)
-    Plotting.plot_2D_anim()
+#    Plotting.plot_2D_anim()
