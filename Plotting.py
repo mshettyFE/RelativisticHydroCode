@@ -23,7 +23,7 @@ def plot_results_1D(
 # I also cleaned up extraneous variables and the like
     with open(input_pkl_file, 'rb') as f:
         history, sim_state = pkl.load(f)
-    sim_state.metric.sanity_check(sim_state.grid_info, sim_state.simulation_params)
+#    sim_state.metric.sanity_check(sim_state.grid_info, sim_state.simulation_params) NOTE: Uncomment this if only running plotting alone
     support = sim_state.grid_info.construct_grid_centers(0)
 
     if(show_mach):
@@ -107,9 +107,9 @@ def plot_2D_anim(
 
     # Initialize image using the first array
     t0, Z0 = data[0]
-    plot_var = Z0[...,0]
-    vmin = plot_var.min()
-    vmax = plot_var.max()
+    vmax  = np.max([arr[0,...].max() for _, arr in data])
+    vmin  = np.min([arr[0,...].min() for _, arr in data])
+    plot_var = Z0[0,...]
     grid_centers_x = last_state.grid_info.construct_grid_centers(0)
     grid_centers_y = last_state.grid_info.construct_grid_centers(1)
     xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
@@ -119,12 +119,35 @@ def plot_2D_anim(
 
     def update(frame):
         t, arr = data[frame]
-        quad.set_array(arr[...,0].ravel())
+        quad.set_array(arr[0,...].ravel())
         ax.title.set_text(f"t = {t:.3f}")  
         return quad, ax.title
 
     frame_indices = list(range(0, len(data), 100))
     ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=False)
+
+    plt.show()
+
+def plot_2D(
+    input_pkl_file: str = "snapshot.pkl"  ,
+    time_slice = -1
+        ):
+    with open(input_pkl_file, 'rb') as f:
+        data, last_state = pkl.load(f)
+ 
+    fig, ax = plt.subplots()
+
+    # Initialize image using the first array
+    t0, Z0 = data[time_slice]
+    plot_var = Z0[0,...]
+    vmin  = plot_var.min()
+    vmax  = plot_var.max()
+    grid_centers_x = last_state.grid_info.construct_grid_centers(0)
+    grid_centers_y = last_state.grid_info.construct_grid_centers(1)
+    xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
+    quad = ax.pcolormesh(xx, yy, plot_var, shading='auto', cmap='viridis', norm=colors.LogNorm(vmin=vmin, vmax=vmax))
+    fig.colorbar(quad, ax=ax)
+    ax.set_title(f"t = {data[time_slice][0]:.3f}")
 
     plt.show()
 

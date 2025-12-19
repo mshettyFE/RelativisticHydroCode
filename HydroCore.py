@@ -41,9 +41,10 @@ class SimulationState:
         velocities = self.get_velocities(self.primitive_previous)
         v_mag_2_fixed = self.metric.three_vector_mag_squared(velocities, self.grid_info, WeightType.CENTER, self.simulation_params)
         shifted_velocity_fixed = self.metric.shift_vector(self.grid_info, self.simulation_params)
-        alpha_fixed = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array
-        inverse_metric_fixed = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
-        beta_fixed = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.BETA,  WeightType.CENTER, self.simulation_params).array
+
+        alpha_fixed = self.metric.get_metric_product(self.grid_info , self.metric.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER), self.simulation_params)
+        inverse_metric_fixed = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER), self.simulation_params)
+        beta_fixed = self.metric.get_metric_product(self.grid_info , self.metric.construct_index(WhichCacheTensor.BETA, WeightType.CENTER) ,self.simulation_params)
 
         # Copy the edge values for initial padding, ignoring variable index. Used for FIXED B/Cs
         self.U_initial_unweighted_padded =  self.generate_fixed_padding(U_unweighted_initial, VariableSet.CONSERVATIVE)
@@ -219,7 +220,7 @@ class SimulationState:
             case WhichRegime.RELATIVITY:
                 enthalpy = self.internal_enthalpy_primitive(W, self.simulation_params)
                 velocities = self.get_velocities(W)
-                alpha  = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params) 
+                alpha  = self.metric.get_metric_product(self.grid_info , self.metric.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER) ,self.simulation_params) 
                 boost = self.metric.W(alpha, velocities, self.grid_info,weight_type, self.simulation_params)
                 D = rho*boost
                 self.set_conservative_var(output,ConservativeIndex.DENSITY, D)
@@ -488,34 +489,113 @@ class SimulationState:
         # Returns the time step needed, the change in the conservative variables, and the recovered primitives of the system prior to stepping
         match self.simulation_params.spatial_integration.method:
             case SpatialUpdateType.FLAT:
+                # Add on ghost cells to all edges
                 U_padded_cart = self.pad_array(U_cart, self.U_initial_unweighted_padded, VariableSet.CONSERVATIVE)
                 W_cart = self.conservative_to_primitive(U_padded_cart)
                 W_padded_cart = self.pad_array(W_cart, self.W_initial_unweighted_padded, VariableSet.PRIMITIVE)
                 assert(W_padded_cart.shape == U_padded_cart.shape)
-                possible_dt = []
-                state_update = np.zeros(U_cart.shape)
+                # Figure out which axes to update along (for instance, if doing 1D sim in 3D grid)
                 if(len(which_axis)==0):
                     axes = tuple(range(self.n_variable_dimensions))
                 else:
                     axes = which_axis
+                # Calculate fluxes along all axes
                 density_flux_padded = self.density_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
                 tau_flux_padded = self.tau_flux(U_padded_cart, W_padded_cart, WeightType.CENTER)
                 momentum_flux_tensor_padded = self.momentum_flux_tensor(U_padded_cart,W_padded_cart, WeightType.CENTER)
+                # Calculate quantities that are shared across all axes
                 velocities = self.get_velocities(W_cart)
                 v_mag_2 = self.metric.three_vector_mag_squared(velocities, self.grid_info, WeightType.CENTER, self.simulation_params)
-                alpha = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array 
-                beta = self.metric.get_metric_product(self.grid_info , WhichCacheTensor.BETA,  WeightType.CENTER, self.simulation_params).array
-                inv_metric =  self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params).array
+                alpha = self.metric.get_metric_product(self.grid_info ,self.metric.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER) ,self.simulation_params) 
+                beta = self.metric.get_metric_product(self.grid_info , self.metric.construct_index(WhichCacheTensor.BETA, WeightType.CENTER),self.simulation_params)
+                inv_metric =  self.metric.get_metric_product(self.grid_info, self.metric.construct_index(WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER), self.simulation_params)
 
-                v_mag_2_fixed_current_padded = self.pad_array(v_mag_2, self.v_mag2_fixed_padded, VariableSet.VECTOR)
+                v_mag_2_padded = self.pad_array(v_mag_2, self.v_mag2_fixed_padded, VariableSet.VECTOR)
                 alpha_padded = self.pad_array( alpha, self.alpha_fixed_padded, VariableSet.SCALAR)
                 beta_padded = self.pad_array( beta, self.inverse_beta_fixed_padded, VariableSet.VECTOR)
                 inverse_metric_padded = self.pad_array(inv_metric , self.inverse_metric_fixed_padded, VariableSet.METRIC) #  NOTE: Going to treat metric as a scalar. Don't know how matrices should reflect...
-                for dim in axes:
-                    flux_change, alpha_plus, alpha_minus = self.spatial_derivative(U_padded_cart,W_padded_cart,
-                                                                                   density_flux_padded, momentum_flux_tensor_padded, tau_flux_padded,
-                                                                                   v_mag_2_fixed_current_padded,alpha_padded, inverse_metric_padded, beta_padded,   
-                                                                                       dim)
+
+                state_update = np.zeros(U_cart.shape)
+                pressure = self.get_primitive_var(W_padded_cart, PrimitiveIndex.PRESSURE)
+                density = self.get_primitive_var(W_padded_cart, PrimitiveIndex.DENSITY)
+                c_s = sound_speed(self.simulation_params,pressure, density)    
+                # Calculate fluxes along each axis and update state
+                possible_dt = []
+                for spatial_index in axes:
+                    current_density  =  density_flux_padded[spatial_index,...]
+                    target = [1]+[*current_density.shape]
+                    current_density = np.reshape(current_density, target)
+                    tau  = tau_flux_padded[spatial_index,...]
+                    target = [1]+[*tau.shape]
+                    current_tau = np.reshape(tau, target)
+                    current_mom_flux  = momentum_flux_tensor_padded[spatial_index,:,...]
+                    cell_flux = np.concatenate(
+                        [
+                            current_density,
+                            current_tau,
+                            current_mom_flux
+                        ], 
+                        axis=0)
+                    # Calculate possible wave speeds along each axis
+                    match self.simulation_params.regime:
+                        case WhichRegime.NEWTONIAN:
+                            lambda_plus = self.get_specific_velocity(W_padded_cart, spatial_index)+c_s
+                            lambda_minus = self.get_specific_velocity(W_padded_cart, spatial_index)-c_s
+                        case WhichRegime.RELATIVITY:
+                            # Eq. 22 of https://iopscience.iop.org/article/10.1086/303604/pdf
+                            beta_component = beta_padded[spatial_index,...]
+                            gamma_ii = inverse_metric_padded[METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,...] 
+                            velocity_component = self.get_specific_velocity(W_padded_cart, spatial_index)
+                            cs_2 = np.power(c_s,2)
+                            factor_1 = 1-v_mag_2_padded*cs_2
+                            factor_2 = 1-v_mag_2_padded 
+                            factor_3 = 1-cs_2
+                            prefactor = alpha_padded/factor_1
+                            common_factor = velocity_component*factor_3
+                            discriminant = factor_2*(gamma_ii*factor_1-np.power(velocity_component,2)*factor_3)
+                            lambda_plus = prefactor*(common_factor + c_s*np.sqrt(discriminant)) - beta_component
+                            lambda_minus = prefactor*(common_factor - c_s*np.sqrt(discriminant)) - beta_component
+                    alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus, spatial_index)
+                    alpha_sum = alpha_minus+alpha_plus
+                    assert(np.all(alpha_sum != 0))
+                    excluded_axes = self.excluded_padding_axes(U_padded_cart, VariableSet.CONSERVATIVE)
+                    alpha_prod = alpha_minus*alpha_plus
+
+                    # Construct left and right states at interfaces
+                    slices_left = [slice(None)]*cell_flux.ndim
+                    for axis in excluded_axes:
+                        slices_left[axis] = slice(None,None,None) # Select all variables
+                    # NOTE: Assuming that excluded axes are always the first axes for Conservative Variable set
+                    slices_left[spatial_index+1] = slice(0,-1,None)
+                    slices_left = tuple(slices_left)
+                    slices_right = [slice(None)]*cell_flux.ndim
+                    for axis in excluded_axes:
+                        slices_right[axis] = slice(None,None,None) 
+                    slices_right[spatial_index+1] = slice(1,None,None)
+                    slices_right = tuple(slices_right)
+
+                    cell_flux_left = cell_flux[slices_left]
+                    conserve_left = U_padded_cart[slices_left]
+                    cell_flux_right = cell_flux[slices_right]
+                    conserve_right = U_padded_cart[slices_right]
+                    flux_interface = (alpha_plus * cell_flux_left + alpha_minus * cell_flux_right
+                                - alpha_prod * (conserve_right - conserve_left)) / (alpha_sum)
+                    remove_ghost_slices = [slice(None)]*flux_interface.ndim
+                    for axis in range(flux_interface.ndim):
+                        if axis in excluded_axes:
+                            continue 
+                        if axis != spatial_index+1:
+                            remove_ghost_slices[axis] = slice(1,-1,None)
+                    flux_interface_unpadded = flux_interface[tuple(remove_ghost_slices)]
+            #       flux_densitized = self.metric.weight_system(flux_interface, self.grid_info, WeightType.EDGE, self.simulation_params)
+                    axis_weights = self.n_variable_dimensions*[WeightType.CENTER]
+                    axis_weights[spatial_index] = WeightType.EDGE
+                    weights = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.DETERMINANT, tuple(axis_weights)), self.simulation_params)
+                    flux_densitized = flux_interface_unpadded * weights
+                    flux_interface_left = flux_densitized[slices_left]
+                    flux_interface_right = flux_densitized[slices_right]
+                    flux_change = (flux_interface_right - flux_interface_left)/self.grid_info.delta(spatial_index)[spatial_index]
+                # NOTE: Possible bug here with dt calculation. Only largest possible dt from all axes should be taken
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
                 dt = max(possible_dt)
@@ -562,98 +642,33 @@ class SimulationState:
         shifted_velocities = self.shift_three_velocity_padded(velocities)
         return (Tau*shifted_velocities+ pressure*velocities)
 
-    def spatial_derivative(self, 
-                           U_padded_cart: npt.ArrayLike, W_padded_cart: npt.ArrayLike, 
-                           density_flux_padded: npt.ArrayLike, momentum_flux_tensor_padded: npt.ArrayLike, tau_flux_padded: npt.ArrayLike,
-                           v_mag_2_padded: npt.ArrayLike, alpha_padded: npt.ArrayLike, inverse_metric_padded: npt.ArrayLike, beta_padded: npt.ArrayLike,
-                             spatial_index: np.uint = 0) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-        # Assuming that U is Cartesian. Cell_scaling is for the fluxes
-        current_density  =  density_flux_padded[spatial_index,...]
-        target = [1]+[*current_density.shape]
-        current_density = np.reshape(current_density, target)
-        tau  = tau_flux_padded[spatial_index,...]
-        target = [1]+[*tau.shape]
-        current_tau = np.reshape(tau, target)
-        current_mom_flux  = momentum_flux_tensor_padded[spatial_index,:,...]
-        cell_flux = np.concatenate(
-            [
-                current_density,
-                current_tau,
-                current_mom_flux
-            ], 
-            axis=0)
-        pressure = self.get_primitive_var(W_padded_cart, PrimitiveIndex.PRESSURE)
-        density = self.get_primitive_var(W_padded_cart, PrimitiveIndex.DENSITY)
-        c_s = sound_speed(self.simulation_params,pressure, density)    
-        match self.simulation_params.regime:
-            case WhichRegime.NEWTONIAN:
-                lambda_plus = self.get_specific_velocity(W_padded_cart, spatial_index)+c_s
-                lambda_minus = self.get_specific_velocity(W_padded_cart, spatial_index)-c_s
-                alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus)
-            case WhichRegime.RELATIVITY:
-                # Eq. 22 of https://iopscience.iop.org/article/10.1086/303604/pdf
-                beta_component = beta_padded[spatial_index,...]
-                gamma_ii = inverse_metric_padded[METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,METRIC_VARIABLE_INDEX.SPACE_1.value+spatial_index,...] 
-                velocity_component = self.get_specific_velocity(W_padded_cart, spatial_index)
-                cs_2 = np.power(c_s,2)
-                factor_1 = 1-v_mag_2_padded*cs_2
-                factor_2 = 1-v_mag_2_padded 
-                factor_3 = 1-cs_2
-                prefactor = alpha_padded/factor_1
-                common_factor = velocity_component*factor_3
-                discriminant = factor_2*(gamma_ii*factor_1-np.power(velocity_component,2)*factor_3)
-                lambda_plus = prefactor*(common_factor + c_s*np.sqrt(discriminant)) - beta_component
-                lambda_minus = prefactor*(common_factor - c_s*np.sqrt(discriminant)) - beta_component
-                alpha_minus, alpha_plus = self.alpha_plus_minus(lambda_plus, lambda_minus)
-                assert(alpha_minus.shape == alpha_plus.shape)
-        alpha_sum = alpha_minus+alpha_plus
-        assert(np.all(alpha_sum != 0))
-        excluded_axes = self.excluded_padding_axes(U_padded_cart, VariableSet.CONSERVATIVE)
-        alpha_prod = alpha_minus*alpha_plus
-        slices_left = [slice(0,-1,None)]*cell_flux.ndim
-        for axis in excluded_axes:
-            slices_left[axis] = slice(None,None,None) # Select all variables
-        slices_left = tuple(slices_left)
-        slices_right = [slice(1,None,None)]*cell_flux.ndim
-        for axis in excluded_axes:
-            slices_right[axis] = slice(None,None,None) 
-        slices_right = tuple(slices_right)
-        cell_flux_left = cell_flux[slices_left]
-        conserve_left = U_padded_cart[slices_left]
-        cell_flux_right = cell_flux[slices_right]
-        conserve_right = U_padded_cart[slices_right]
-        flux_interface = (alpha_plus * cell_flux_left + alpha_minus * cell_flux_right
-                      - alpha_prod * (conserve_right - conserve_left)) / (alpha_sum)
- #       flux_densitized = self.metric.weight_system(flux_interface, self.grid_info, WeightType.EDGE, self.simulation_params)
-        weights = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.DETERMINANT, WeightType.EDGE, self.simulation_params).array
-        flux_densitized = flux_interface * weights
-        flux_interface_left = flux_densitized[slices_left]
-        flux_interface_right = flux_densitized[slices_right]
-        out = (flux_interface_right - flux_interface_left)/self.grid_info.delta(spatial_index)[spatial_index]
-        return out , alpha_plus, alpha_minus
-
-    def alpha_plus_minus(self, lambda_plus: npt.ArrayLike, lambda_minus: npt.ArrayLike) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        # We have two lists of sounds speeds in the left and right cells. Do MAX(0, left, right) for + and MAX(0,-left, -right) for - 
-        zeros_shape = [dim-1 for dim in lambda_plus.shape]
-        zeros = np.zeros(zeros_shape)
+    def alpha_plus_minus(self, lambda_plus: npt.ArrayLike, lambda_minus: npt.ArrayLike, spatial_index:int ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        alpha_plus = np.zeros(lambda_plus.shape)
+        alpha_minus = np.zeros(lambda_minus.shape)
+        assert(alpha_minus.shape == alpha_plus.shape)
+        # We have two lists of sounds speeds in the left and right cells. Do MAX(0, left, right) for + and MAX(0,-left, -right)
         # Grab the left and right speeds from the padded array
-        slices_left = tuple([slice(0,-1,None)]*self.n_variable_dimensions)
-        slices_right = tuple([slice(1,None,None)]*self.n_variable_dimensions)
+        everything = [slice(None,None,None)]*alpha_plus.ndim
+        slices_left = everything.copy()
+        slices_right = everything.copy()
+        slices_left[spatial_index] = slice(0,-1,None)
+        slices_right[spatial_index] = slice(1,None,None)
+        slices_left = tuple(slices_left)
+        slices_right = tuple(slices_right)
         lambda_plus_left = lambda_plus[slices_left]
         lambda_plus_right = lambda_plus[slices_right]
         lambda_minus_left = lambda_minus[slices_left]
         lambda_minus_right = lambda_minus[slices_right]
-        # First, the plus case   
-        alpha_plus_candidates = np.stack([zeros, lambda_plus_left, lambda_plus_right], axis=zeros.ndim)    
-        # Calculate max across each row
-        alpha_plus = np.max(alpha_plus_candidates, axis=zeros.ndim)
-        alpha_minus_candidates = np.stack([zeros, -lambda_minus_left, -lambda_minus_right], axis=zeros.ndim)    
-        alpha_minus = np.max(alpha_minus_candidates, axis=zeros.ndim)
+        assert(lambda_plus_left.shape == lambda_plus_right.shape == lambda_minus_left.shape == lambda_minus_right.shape)
+        zeros = np.zeros(lambda_plus_left.shape)
+        # First, the plus case
+        alpha_plus = np.maximum(zeros , np.maximum(lambda_plus_left ,lambda_plus_right ))
+        alpha_minus = np.maximum(zeros , np.maximum(-lambda_minus_left ,-lambda_minus_right ))
         return (alpha_minus, alpha_plus)
     
     def StressEnergyTensor(self,W_cart_unpadded:npt.ArrayLike):
         # TODO: Change 4 vector to include normalization factor (Did for SR, need to generalize to GR)
-        metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
+        metric = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.METRIC, WeightType.CENTER), self.simulation_params, use_cache=True)
         rho  = self.get_primitive_var(W_cart_unpadded, PrimitiveIndex.DENSITY)
         pressure  = self.get_primitive_var(W_cart_unpadded, PrimitiveIndex.PRESSURE)
         velocities = self.get_velocities(W_cart_unpadded) # spatial components of 4 velocity
@@ -665,14 +680,14 @@ class SimulationState:
         shifted_three_velocities = self.metric.shift_three_velocity(velocities, self.grid_info, self.simulation_params)
         four_velocities[1:,...] = shifted_three_velocities 
         # Scale by the boost
-        alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER, self.simulation_params).array
+        alpha = self.metric.get_metric_product(self.grid_info, self.metric.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER),self.simulation_params)
         W = self.metric.W(alpha, velocities, self.grid_info,WeightType.CENTER, self.simulation_params)
         four_velocities[...] = W*four_velocities[...]
         u_u  = np.zeros(metric.shape) # Shape of (grid_size, first, secon)
         # Help from Gemini . Prompt:  I have a numpy array of shape (10, 10, 2). I want to take the outer product along the last axis and end up with an array of shape (10,10,2,2) . Asked for generalization for einsum
         # What it does: Takes the outer product on the last index, then moves the two indices to the front (to be compatible with the ordering of the metric field)
         u_u = np.einsum('...k,...l->kl...', four_velocities, four_velocities)
-        inv_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER, self.simulation_params, use_cache=True).array
+        inv_metric = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER), self.simulation_params, use_cache=True)
         t_mu_nu_raised = rho*self.internal_enthalpy_primitive(W_cart_unpadded, self.simulation_params)*u_u +pressure*inv_metric
         assert(0)
         return t_mu_nu_raised
@@ -694,11 +709,11 @@ class SimulationState:
         # self.set_conservative_var(output, ConservativeIndex.Z_MOMENTUM_DENSITY, 0)
         # return output
         T_mu_nu_raised = self.StressEnergyTensor(W)
-        metric: Metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.METRIC,  WeightType.CENTER, self.simulation_params).array
-        partial_metric = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_DER,  WeightType.CENTER, self.simulation_params).array
-        partial_ln_alpha = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.PARTIAL_LN_ALPHA,  WeightType.CENTER, self.simulation_params).array
-        alpha =self.metric.get_metric_product(self.grid_info, WhichCacheTensor.ALPHA,  WeightType.CENTER, self.simulation_params).array
-        Christoffel_upper = self.metric.get_metric_product(self.grid_info, WhichCacheTensor.CHRISTOFFEL_UPPER0,  WeightType.CENTER, self.simulation_params).array
+        metric = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.METRIC, WeightType.CENTER), self.simulation_params)
+        partial_metric = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.PARTIAL_DER, WeightType.CENTER), self.simulation_params)
+        partial_ln_alpha = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.PARTIAL_LN_ALPHA, WeightType.CENTER), self.simulation_params)
+        alpha =self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER), self.simulation_params)
+        Christoffel_upper = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.CHRISTOFFEL_UPPER0, WeightType.CENTER), self.simulation_params)
         rho_source = np.zeros(alpha.shape)
         tau_first = np.einsum("ij...,i...->j...", T_mu_nu_raised, partial_ln_alpha)[METRIC_VARIABLE_INDEX.TIME.value,...]
         tau_second = np.einsum("ij...,kji...->k...", T_mu_nu_raised, Christoffel_upper)[METRIC_VARIABLE_INDEX.TIME.value,...]
@@ -713,7 +728,6 @@ class SimulationState:
         self.set_conservative_var(output,ConservativeIndex.DENSITY, rho_source)
         self.set_conservative_var(output,ConservativeIndex.TAU, energy_source)
         self.set_momentum_fluxes(output, source_flux[METRIC_VARIABLE_INDEX.SPACE_1.value:,...])
-        assert(0)
         return output
 
     def calc_dt(self, alpha_plus: npt.ArrayLike, alpha_minus:npt.ArrayLike):

@@ -2,17 +2,17 @@ import numpy as np
 import numpy.typing as npt
 from GridInfo import WeightType, GridInfo
 from typing import Tuple, List
-from metrics.Metric import Metric, cached_array, METRIC_VARIABLE_INDEX
+from metrics.Metric import Metric, CachedTensor, METRIC_VARIABLE_INDEX
 from CommonClasses import SimParams
 
 class SphericalMinkowski_1_3(Metric):
     dimension: np.float64  = None 
-    cached_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_inv_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_determinant_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_determinant_edge: cached_array = cached_array(None, WeightType.EDGE)
-    cached_partial_der_metric_center: cached_array  = cached_array(None, WeightType.CENTER)
-    cached_christoffel_upper0_center: cached_array  = cached_array(None, WeightType.CENTER)
+    cached_metric_center:  CachedTensor  = CachedTensor(None, WeightType.CENTER)
+    cached_inv_metric_center:  CachedTensor  = CachedTensor(None, WeightType.CENTER)
+    cached_determinant_center:  CachedTensor  = CachedTensor(None, WeightType.CENTER)
+    cached_determinant_edge: CachedTensor = CachedTensor(None, WeightType.EDGE)
+    cached_partial_der_metric_center: CachedTensor  = CachedTensor(None, WeightType.CENTER)
+    cached_christoffel_upper0_center: CachedTensor  = CachedTensor(None, WeightType.CENTER)
 
     def __init__(self, grid_info: GridInfo, sim_params: SimParams):
         super().__init__()

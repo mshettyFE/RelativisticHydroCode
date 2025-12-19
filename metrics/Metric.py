@@ -1,11 +1,11 @@
 import numpy as np 
 from abc import ABC,abstractmethod 
-from dataclasses import dataclass 
+from dataclasses import dataclass
 import numpy.typing as npt
 from GridInfo import WeightType, GridInfo
 from enum import Enum
 from CommonClasses import SimParams
-from typing import Tuple, List
+from typing import Tuple, Dict
 
 class METRIC_VARIABLE_INDEX(Enum):
     TIME = 0
@@ -23,211 +23,47 @@ class WhichCacheTensor(Enum):
     ALPHA  = 6
     BETA = 7
 
+TensorIndex = Tuple[WhichCacheTensor, Tuple[WeightType,...]]
+MeshGrid = npt.NDArray[np.float64]
+TensorData = npt.NDArray[np.float64]
+
 @dataclass
-class cached_array:
-    array: npt.NDArray[np.float64]   = None 
-    weight_type: WeightType = WeightType.CENTER
+class CachedTensor:
+    array: TensorData
+    mesh_grid: MeshGrid
 
 class Metric(ABC):
     dimension: np.float64  = None 
-    cached_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_inv_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_determinant_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_determinant_edge: cached_array = cached_array(None, WeightType.EDGE)
-    cached_partial_der_metric_center: cached_array  = cached_array(None, WeightType.CENTER)
-    cached_christoffel_upper0_center: cached_array  = cached_array(None, WeightType.CENTER)
-    cached_partial_ln_alpha_center: cached_array =  cached_array(None, WeightType.CENTER)
-    cached_alpha_center: cached_array =  cached_array(None, WeightType.CENTER)
-    cached_beta_center: cached_array =  cached_array(None, WeightType.CENTER)
+    cached_tensor_data: Dict[TensorIndex, CachedTensor] = {}
 
-    # Call this at the end of the constructor of the subclass to make sure that your metric conforms
-    # Should also fill all of the caches (Assuming I didn't miss one)
-    def sanity_check(self, grid_info: GridInfo, sim_params: SimParams) ->  bool:
-        assert(self.dimension != None)
-        assert(self.dimension >=2) # Need at least 1+1 formulation
-        cases = [
-            (WhichCacheTensor.METRIC, WeightType.CENTER),
-            (WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER),
-            (WhichCacheTensor.DETERMINANT, WeightType.CENTER),
-            (WhichCacheTensor.DETERMINANT, WeightType.EDGE),
-            (WhichCacheTensor.PARTIAL_DER, WeightType.CENTER),
-            (WhichCacheTensor.CHRISTOFFEL_UPPER0, WeightType.CENTER)  ,          
-            (WhichCacheTensor.PARTIAL_LN_ALPHA, WeightType.CENTER)  ,          
-            (WhichCacheTensor.ALPHA, WeightType.CENTER),
-            (WhichCacheTensor.BETA, WeightType.CENTER)
-        ]
-
-        # Fill up the caches
-        for item in cases:
-            self.get_metric_product(grid_info, item[0], item[1], sim_params, use_cache=False)
-        # Lorentzian manifolds should have negative determinant everywhere, right?
-        det = self.get_metric_product(grid_info, WhichCacheTensor.DETERMINANT, WeightType.CENTER,  sim_params, use_cache=True).array
-        assert(np.all( det<=0 ))
-
-    def verify_meshgrid(self, mesh_grid:Tuple[npt.NDArray[np.float64],...]) ->  bool:
-        assert(len(mesh_grid) == self.dimension-1) # Ignore time axis. Only dealing with time independent metrics
-        assert(all(x.shape == mesh_grid[0].shape for x in mesh_grid))
+    def validate_index(self, index: TensorIndex) -> bool:
+        assert(len(index)==2)
+        assert(isinstance(index[0], WhichCacheTensor))
+        assert(isinstance(index[1], tuple))
+        assert(all(isinstance(x, WeightType) for x in index[1]))
         return True
     
-    def retrieve_cache(self, weight_type: WeightType, which_cache: WhichCacheTensor)-> Tuple[cached_array, bool] | Tuple[str, bool]:
-        output = None
-        match weight_type:
-            case WeightType.CENTER:
-                match which_cache:
-                    case WhichCacheTensor.METRIC:
-                        output = (self.cached_metric_center, True)
-                    case WhichCacheTensor.INVERSE_METRIC:
-                        output = (self.cached_inv_metric_center, True)
-                    case WhichCacheTensor.DETERMINANT:
-                        output = (self.cached_determinant_center, True)
-                    case WhichCacheTensor.PARTIAL_DER:
-                        output = (self.cached_partial_der_metric_center, True)
-                    case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                        output = (self.cached_christoffel_upper0_center, True)
-                    case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                        output = (self.cached_partial_ln_alpha_center, True)
-                    case WhichCacheTensor.ALPHA:
-                        output = (self.cached_alpha_center, True)
-                    case WhichCacheTensor.BETA:
-                        output = (self.cached_beta_center, True)
-                    case _:
-                        output =  ("Unimplemented tensor product from metric", False)
-            case WeightType.EDGE:
-                match which_cache:
-                    case WhichCacheTensor.DETERMINANT:
-                        output = (self.cached_determinant_edge, True)
-                    case _:
-                        output =  ("Unimplemented tensor product from metric on edge", False)
-            case _:
-                output = ("Invalid weight type", False)
-        # Output can possibly be (None, True). Need to handle that case
-        return output
+    def construct_index(self, which_cache: WhichCacheTensor, weight_types: Tuple[WeightType,...]| WeightType) -> TensorIndex:
+        if(isinstance(weight_types, WeightType)):
+            weight_types = (weight_types,)* (self.dimension -1)
+        assert(len(weight_types)== self.dimension -1)
+        index = (which_cache, weight_types)
+        self.validate_index(index)
+        return index
 
-    def expected_tensor_dimensions(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], which_cache: WhichCacheTensor) -> Tuple[List[int], bool] | Tuple[str, bool]:
-        match which_cache:
-            case WhichCacheTensor.METRIC:
-                # first, second, gridsize
-                return (tuple([self.dimension, self.dimension, *(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.INVERSE_METRIC:
-                # first, second, gridsize
-                return (tuple([self.dimension, self.dimension, *(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.DETERMINANT:
-                # gridsize
-                return (tuple([*(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.PARTIAL_DER:
-                # Derivative, first, second, gridsize
-                return (tuple([self.dimension, self.dimension, self.dimension, *(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                # Upper, first_lower, second_lower, gridsize
-                return (tuple([self.dimension,self.dimension, self.dimension, *(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                # derivative, gridsize
-                return (tuple([self.dimension,  *(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.ALPHA:
-                # gridsize
-                return (tuple([*(mesh_grid[0].shape)]), True)
-            case WhichCacheTensor.BETA:
-                # gridsize
-                return (tuple([self.dimension-1,*(mesh_grid[0].shape)]), True)
-            case _:
-                return ("Unimplemented tensor product from metric", False)
-
-    def store_cache(self, new_tensor: npt.NDArray[np.float64],  weight_type: WeightType, which_cache: WhichCacheTensor) -> Tuple[cached_array, bool] | Tuple[str, bool]:
-        # Make sure that new_tensor has the same shape as the target cache. Can use self.expected_tensor_dimension() to check for this
-        match weight_type:
-            case WeightType.CENTER:
-                match which_cache:
-                    case WhichCacheTensor.METRIC:
-                        self.cached_metric_center.array = new_tensor
-                        return (self.cached_metric_center, True)
-                    case WhichCacheTensor.INVERSE_METRIC:
-                        self.cached_inv_metric_center.array = new_tensor
-                        return (self.cached_inv_metric_center,True)
-                    case WhichCacheTensor.DETERMINANT:
-                        self.cached_determinant_center.array  = new_tensor
-                        return (self.cached_determinant_center,True)
-                    case WhichCacheTensor.PARTIAL_DER:
-                        self.cached_partial_der_metric_center.array  = new_tensor
-                        return (self.cached_partial_der_metric_center,True)
-                    case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                        self.cached_christoffel_upper0_center.array  = new_tensor
-                        return (self.cached_christoffel_upper0_center,True)
-                    case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                        self.cached_partial_ln_alpha_center.array = new_tensor
-                        return (self.cached_partial_ln_alpha_center,True)
-                    case WhichCacheTensor.ALPHA:
-                        self.cached_alpha_center.array = new_tensor
-                        return (self.cached_alpha_center,True)
-                    case WhichCacheTensor.BETA:
-                        self.cached_beta_center.array = new_tensor
-                        return (self.cached_beta_center,True)
-                    case _:
-                        return ("Unimplemented tensor product from metric", False)
-            case WeightType.EDGE:
-                match which_cache:
-                    case WhichCacheTensor.DETERMINANT:
-                        self.cached_determinant_edge.array = new_tensor
-                        return (self.cached_determinant_edge, True)
-                    case _:
-                        return ("Unimplemented tensor product from metric on edge", False)
-            case _:
-                return ("Invalid weight type", False)
-
-    def cell_weights(self, grid_info:GridInfo, weight_type: WeightType, sim_params: SimParams):
-        return np.sqrt(-(self.get_metric_product( grid_info, WhichCacheTensor.DETERMINANT,weight_type, sim_params, use_cache=True).array))
-
-    def weight_system(self, U_cart: npt.ArrayLike, grid_info: GridInfo, weight_type: WeightType, sim_params: SimParams):
-        weights = self.cell_weights(grid_info, weight_type, sim_params)
-        return weights * U_cart
-    
-    def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType, sim_params: SimParams):
-        weights = self.cell_weights(grid_info, weight_type, sim_params)
-        return U/weights
-    
-    def three_vector_mag_squared(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
-        metric =  self.get_metric_product(grid_info, WhichCacheTensor.METRIC,  weight_type,sim_params).array
-        dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
-        grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
-        index = tuple(dim_slice+grid_slice)
-        spatial_metric = metric[index]
-        output = np.einsum("ij...,i...,j...->...", spatial_metric, vec, vec)
-        return output
-        # return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
-    
-    def W(self, alpha: cached_array, three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
-        # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
-        v2_mag  = self.three_vector_mag_squared(three_velocities, grid_info, weight_type, sim_params)
-        np.clip(v2_mag, 0, 1.0 - 1e-14, out=v2_mag)
-        inter =1-v2_mag
-#        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
-        return alpha.array*np.power( inter, -0.5)
-
-    def three_vel_to_four_vel_components(self, three_velocities_unpadded:npt.NDArray,  grid_info: GridInfo, sim_params: SimParams)-> npt.NDArray:
-        alpha = self.get_metric_product( grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER,  sim_params).array
-        W = self.W(alpha, three_velocities_unpadded, grid_info, WeightType.CENTER, sim_params)
-        return W*(three_velocities_unpadded-self.shift_vector( sim_params, grid_info))
-    
-    def shift_vector(self, grid_info: GridInfo, sim_params: SimParams)-> npt.NDArray:
-        beta = self.get_metric_product( grid_info, WhichCacheTensor.BETA, WeightType.CENTER,  sim_params).array
-        alpha = self.get_metric_product( grid_info, WhichCacheTensor.ALPHA, WeightType.CENTER,  sim_params).array
-        shift = beta/alpha
-        return shift
-    
-    def get_metric_product(self, grid_info: GridInfo, which_cache: WhichCacheTensor,  weight_type: WeightType,  sim_params: SimParams, use_cache =True) -> cached_array:
-        if(use_cache):
-            output, success = self.retrieve_cache(weight_type, which_cache)
-            if (success==False):
-                raise Exception(output)
-            maybe_output: cached_array = output
-            if(maybe_output is not None):
-                return output
-        # Output was None, or we aren't using the cache. Need to generate the requested product
-        mesh_grid = grid_info.mesh_grid(weight_type)
-        expected_product_size, success =  self.expected_tensor_dimensions(mesh_grid, which_cache)
+    def get_metric_product(self, grid_info: GridInfo,  index: TensorIndex,  sim_params: SimParams, use_cache =True) -> npt.NDArray[np.float64]:
+        self.validate_index(index)
+        which_cache, weight_type_per_axis = index
+        cached_product = self.cached_tensor_data.get(index, None)
+        if(cached_product is not None and use_cache):
+            return cached_product.array
+        mesh_grid = None
+        if(cached_product is not None): 
+            _, mesh_grid = cached_product
+        if(mesh_grid is None): 
+            mesh_grid = grid_info.mesh_grid(weight_type_per_axis)[0] # NOTE: Assuming that mesh_grid is fixed for a given simulation.  Also is that the shape is the same for all axes
+        expected_product_size =  self.expected_tensor_dimensions(mesh_grid, index)
         #print("DEBUG", expected_product_size, which_cache, weight_type)
-        if(success==False): 
-            raise Exception(expected_product_size) # Throw error message
-        product = None
         match which_cache:
             case WhichCacheTensor.METRIC:
                 product = self.metric(mesh_grid,expected_product_size,sim_params)
@@ -248,12 +84,138 @@ class Metric(ABC):
             case _:
                 product  = None
         if(product is None):
-           raise Exception("invalid metric product", which_cache,  weight_type)
+           raise Exception("invalid metric product", index)
         assert(product.shape== expected_product_size )
-        final, success = self.store_cache(product, weight_type, which_cache)
-        if(success==False):
-            raise Exception(final)
-        return final
+        self.cached_tensor_data[index] = CachedTensor(product, mesh_grid)
+        return self.cached_tensor_data[index].array
+
+    # Call this at the end of the constructor of the subclass to make sure that your metric conforms
+    # Should also fill all of the caches (Assuming I didn't miss one)
+    def sanity_check(self, grid_info: GridInfo, sim_params: SimParams) ->  bool:
+        assert(self.dimension != None)
+        assert(self.dimension >=2) # Need at least 1+1 formulation
+        center_weights_info = tuple([WeightType.CENTER]* (self.dimension -1))
+        which_tensors = [
+            WhichCacheTensor.METRIC,
+            WhichCacheTensor.INVERSE_METRIC,
+            WhichCacheTensor.DETERMINANT,
+            WhichCacheTensor.PARTIAL_DER,
+            WhichCacheTensor.CHRISTOFFEL_UPPER0,
+            WhichCacheTensor.PARTIAL_LN_ALPHA,
+            WhichCacheTensor.ALPHA,
+            WhichCacheTensor.BETA
+        ]
+        cases  = [(item, center_weights_info) for item in which_tensors]
+        # Add edge weight determinant case
+        mixed_weight_types_per_axis = []
+        for i in range(self.dimension -1):
+            item  = []
+            for j in range(self.dimension -1):
+                if(i==j):
+                    item.append(WeightType.EDGE)
+                else:
+                    item.append(WeightType.CENTER)
+            mixed_weight_types_per_axis.append( tuple(item) )
+        for item in mixed_weight_types_per_axis:
+            cases.append( (WhichCacheTensor.DETERMINANT, item) )
+        # Fill up the caches
+        for case in cases:
+            print("DEBUG: Filling cache for ", case)
+            self.get_metric_product(grid_info, case, sim_params, use_cache=False)
+        assert(len(self.cached_tensor_data)== len(cases))
+        self.get_metric_product(grid_info, case, sim_params, use_cache=True)
+        assert(len(self.cached_tensor_data)== len(cases))
+        for pair in self.cached_tensor_data.items():
+            index, cached_tensor = pair
+            axes = index[1]
+            expected_mesh_grid = grid_info.mesh_grid(axes)[0]
+            assert(np.array_equal(cached_tensor.mesh_grid, expected_mesh_grid))
+            expected_size = self.expected_tensor_dimensions(cached_tensor.mesh_grid, index)
+            assert(cached_tensor.array.shape== expected_size)
+        # Lorentzian manifolds should have negative determinant everywhere, right?
+        det = self.get_metric_product(grid_info,  self.construct_index(WhichCacheTensor.DETERMINANT, WeightType.CENTER),  sim_params, use_cache=True)
+        assert(np.all( det<=0 ))
+
+    def expected_tensor_dimensions(self, mesh_grid: npt.NDArray[np.float64], index: TensorIndex) -> npt.NDArray[np.int64]:
+        self.validate_index(index)
+        which_tensor, _ = index
+        # Implicitly assuming that all mesh grids have the same shape.
+        match which_tensor:
+            case WhichCacheTensor.METRIC:
+                # first, second, gridsize
+                size = tuple([self.dimension, self.dimension, *(mesh_grid.shape)])
+            case WhichCacheTensor.INVERSE_METRIC:
+                # first, second, gridsize
+                size  = tuple([self.dimension, self.dimension, *(mesh_grid.shape)])
+            case WhichCacheTensor.DETERMINANT:
+                # gridsize
+                size   = tuple([*(mesh_grid.shape)])
+            case WhichCacheTensor.PARTIAL_DER:
+                # Derivative, first, second, gridsize
+                size   = tuple([self.dimension, self.dimension, self.dimension, *(mesh_grid.shape)])
+            case WhichCacheTensor.CHRISTOFFEL_UPPER0:
+                # Upper, first_lower, second_lower, gridsize
+                size   = tuple([self.dimension,self.dimension, self.dimension, *(mesh_grid.shape)])
+            case WhichCacheTensor.PARTIAL_LN_ALPHA:
+                # derivative, gridsize
+                size  = tuple([self.dimension,  *(mesh_grid.shape)])
+            case WhichCacheTensor.ALPHA:
+                # gridsize
+                size  =tuple([*(mesh_grid.shape)])
+            case WhichCacheTensor.BETA:
+                # gridsize
+                size   = tuple([self.dimension-1,*(mesh_grid.shape)])
+            case _:
+                raise Exception("Unimplemented tensor product from metric")
+        return size
+
+    def cell_weights(self, grid_info:GridInfo, weight_type: Tuple[WeightType,...]| WeightType, sim_params: SimParams): 
+        determinant_index = self.construct_index(WhichCacheTensor.DETERMINANT, weight_type)
+        return np.sqrt(-(self.get_metric_product( grid_info, determinant_index, sim_params, use_cache=True)))
+
+    def weight_system(self, U_cart: npt.ArrayLike, grid_info: GridInfo, weight_type: WeightType, sim_params: SimParams):
+        weights = self.cell_weights(grid_info, weight_type, sim_params)
+        return weights * U_cart
+    
+    def unweight_system(self, U: npt.ArrayLike, grid_info: GridInfo,  weight_type: WeightType, sim_params: SimParams):
+        weights = self.cell_weights(grid_info, weight_type, sim_params)
+        return U/weights
+    
+    def three_vector_mag_squared(self, vec:npt.ArrayLike, grid_info:  GridInfo, weight_type: Tuple[WeightType,...]| WeightType, sim_params: SimParams):
+        if(isinstance(weight_type, WeightType)):
+            weight_type = (weight_type,)* (self.dimension -1)
+        assert(len(weight_type)== self.dimension -1)
+        index = (WhichCacheTensor.METRIC, weight_type )
+        metric =  self.get_metric_product(grid_info, index,sim_params)
+        dim_slice = [slice(1, None, None), slice(1, None, None)] # Get the spatial components of the metric tensor
+        grid_slice = [slice(None)]*(self.dimension-1) # Index through all of the grid dimensions
+        index = tuple(dim_slice+grid_slice)
+        spatial_metric = metric[index]
+        output = np.einsum("ij...,i...,j...->...", spatial_metric, vec, vec)
+        return output
+        # return  np.clip(output, a_min=None, a_max=1-epsilon) # Hack to prevent velocities which are way to big
+    
+    def W(self, alpha: npt.NDArray[np.float64], three_velocities: npt.ArrayLike, grid_info:  GridInfo, weight_type: WeightType, sim_params: SimParams):
+        # NOTE: velocities Need to be the pure spatial velocities. They should **not** be the spatial components of the 4 velocity vector
+        v2_mag  = self.three_vector_mag_squared(three_velocities, grid_info, weight_type, sim_params)
+        np.clip(v2_mag, 0, 1.0 - 1e-14, out=v2_mag)
+        inter =1-v2_mag
+#        return alpha.array*np.power( np.clip(inter, a_min=0+epsilon, a_max=1), -0.5)
+        return alpha*np.power( inter, -0.5)
+
+    def three_vel_to_four_vel_components(self, three_velocities_unpadded:npt.NDArray,  grid_info: GridInfo, sim_params: SimParams)-> npt.NDArray:
+        alpha_index = self.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER)
+        alpha = self.get_metric_product( grid_info, alpha_index,  sim_params)
+        W = self.W(alpha, three_velocities_unpadded, grid_info, WeightType.CENTER, sim_params)
+        return W*(three_velocities_unpadded-self.shift_vector( sim_params, grid_info))
+    
+    def shift_vector(self, grid_info: GridInfo, sim_params: SimParams)-> npt.NDArray:
+        beta_index = self.construct_index(WhichCacheTensor.BETA, WeightType.CENTER)
+        alpha_index = self.construct_index(WhichCacheTensor.ALPHA, WeightType.CENTER)
+        beta = self.get_metric_product( grid_info, beta_index,  sim_params)
+        alpha = self.get_metric_product( grid_info, alpha_index,  sim_params)
+        shift = beta/alpha
+        return shift
 
     @abstractmethod
     def metric(self, mesh_grid: Tuple[npt.NDArray[np.float64],...], expected_product_size: Tuple[int,...], sim_params: SimParams) ->  npt.NDArray[np.float64]:
