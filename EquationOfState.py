@@ -19,11 +19,6 @@ def sound_speed(simulation_params: SimParams, pressure: npt.ArrayLike, density: 
             return np.sqrt(simulation_params.gamma* pressure / density)
     return 
 
-def internal_enthalpy_primitive(W: npt.ArrayLike, sim_params: SimParams,  n_variable_dims) -> npt.NDArray[np.float64]:
-    pressure = index_primitive_var(W, PrimitiveIndex.PRESSURE,n_variable_dims)
-    density = index_primitive_var(W, PrimitiveIndex.DENSITY,n_variable_dims)
-    return internal_enthalpy_primitive_raws(pressure, density, sim_params)
-
 def internal_enthalpy_primitive_raws(pressure, density, sim_params: SimParams) -> npt.NDArray[np.float64]:
     internal_energy  =equation_of_state_primitive(sim_params, pressure, density )
     return 1 + internal_energy + pressure/density

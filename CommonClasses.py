@@ -41,19 +41,3 @@ class SimParams:
     time_integration: TimeUpdateType 
     spatial_integration: SpatialUpdate
     regime: WhichRegime 
-
-## Indexing variable tensors
-
-def index_primitive_var( primitive: npt.NDArray, var_type: PrimitiveIndex, n_variable_dims: int):
-    match n_variable_dims:
-        case 1:
-            max_allowed_index = PrimitiveIndex.X_VELOCITY
-        case 2:
-            max_allowed_index = PrimitiveIndex.Y_VELOCITY
-        case 3:
-            max_allowed_index = PrimitiveIndex.Z_VELOCITY
-        case _:
-            raise Exception("Unimplemented simulation dimension")
-    if(var_type.value <= max_allowed_index.value):
-        return primitive[..., var_type.value] 
-    raise Exception("Trying to index momentum that is larger than the dimension of the problem")
