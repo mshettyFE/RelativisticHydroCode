@@ -78,7 +78,7 @@ class GridInfo:
                     boundaries.append( self.construct_grid_edges(i) )
                 case _:
                     raise Exception("Invalid Weight type")
-        out = np.meshgrid(*boundaries,indexing='ij')
+        out = np.meshgrid(*boundaries,indexing='xy')
         return out
 
 if __name__=="__main__":

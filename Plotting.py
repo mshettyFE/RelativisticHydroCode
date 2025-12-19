@@ -145,6 +145,7 @@ def plot_2D(
     grid_centers_x = last_state.grid_info.construct_grid_centers(0)
     grid_centers_y = last_state.grid_info.construct_grid_centers(1)
     xx,yy  = np.meshgrid(grid_centers_x, grid_centers_y)
+    print(xx.shape, yy.shape, plot_var.shape)
     quad = ax.pcolormesh(xx, yy, plot_var, shading='auto', cmap='viridis', norm=colors.LogNorm(vmin=vmin, vmax=vmax))
     fig.colorbar(quad, ax=ax)
     ax.set_title(f"t = {data[time_slice][0]:.3f}")

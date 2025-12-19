@@ -133,7 +133,7 @@ def ImplosionInitialization(t_max = 2.5, N_cells = 100, regime=  WhichRegime.NEW
             )
     xx,yy = grid_info.mesh_grid( (WeightType.CENTER, WeightType.CENTER) )
     summed = xx+yy
-    primitives = np.zeros([4]+ [*summed.shape]  ) 
+    primitives = np.zeros([4]+ [*summed.shape]  )
     lower = summed < 0.15
     upper = summed >= 0.15 
     primitives[ PrimitiveIndex.DENSITY.value, lower] = 0.125
@@ -183,8 +183,8 @@ if __name__ == "__main__":
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
-    runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
-    Plotting.plot_2D_anim()
-    # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-    # Plotting.plot_2D()
+    # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
     # Plotting.plot_2D_anim()
+    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+    # Plotting.plot_2D(time_slice=150)
+    Plotting.plot_2D_anim()

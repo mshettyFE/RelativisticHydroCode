@@ -352,25 +352,26 @@ class SimulationState:
  
 
     def axis_to_vector_index_map(self, var_type: VariableSet) -> dict:
+        # axis is the index of the tensor 
+        # Need to make a particular spatial axis map to the corresponding variable index for that direction
         match var_type:
             case VariableSet.CONSERVATIVE:
                 axis_to_vel_map = {
-                    0: ConservativeIndex.X_MOMENTUM_DENSITY.value,
-                    1: ConservativeIndex.Y_MOMENTUM_DENSITY.value,
-                    2: ConservativeIndex.Z_MOMENTUM_DENSITY.value
+                    1: ConservativeIndex.X_MOMENTUM_DENSITY.value,
+                    2: ConservativeIndex.Y_MOMENTUM_DENSITY.value,
+                    3: ConservativeIndex.Z_MOMENTUM_DENSITY.value
                 }
             case VariableSet.PRIMITIVE:
                 axis_to_vel_map = {
-                    0: PrimitiveIndex.X_VELOCITY.value,
-                    1: PrimitiveIndex.Y_VELOCITY.value,
-                    2: PrimitiveIndex.Z_VELOCITY.value
+                    1: PrimitiveIndex.X_VELOCITY.value,
+                    2: PrimitiveIndex.Y_VELOCITY.value,
+                    3: PrimitiveIndex.Z_VELOCITY.value
                 }
             case VariableSet.VECTOR:# NOTE: Hack for now since the only vectors have the variable index at the start
                 axis_to_vel_map = {
-                    0:0,
-                    1: 1,
-                    2: 2,
-                    3: 3
+                    1: 0,
+                    2: 1,
+                    3: 2
                 }
             case VariableSet.SCALAR:
                 axis_to_vel_map = {}
@@ -422,10 +423,11 @@ class SimulationState:
         padded = np.pad(var, pad_width)
         # Select the correct fixed boundaries
         assert(fixed.shape == padded.shape)
+        axis_to_vel_map  = self.axis_to_vector_index_map(var_set)
         # Now apply boundary padding
         for axis in included_axes:
             # Grab the B/Cs for this particular dimension
-            left_bc, right_bc = self.bcm.get_boundary_conds(axis)
+            left_bc, right_bc = self.bcm.get_boundary_conds(axis, var_set)
             # Determine the pad widths for this axis
             iaxis_pad_width = pad_width[axis]
             # First select the cells that need updating
@@ -443,19 +445,19 @@ class SimulationState:
             upper_zero_grad_slices[axis] = slice(-iaxis_pad_width[1]-1, -iaxis_pad_width[1], None)
             upper_zero_grad_slices = tuple(upper_zero_grad_slices)
             # For fixed, use the same slices, but index the fixed array
-            axis_to_vel_map  = self.axis_to_vector_index_map(var_set)
-            has_vector_components = len(axis_to_vel_map)>0
+            has_vector_components = axis in axis_to_vel_map.keys()
             if(has_vector_components): # (Only need to do this if we have vector variables)
-                target_idx = axis_to_vel_map[axis]
-                
+                target_idx = axis_to_vel_map[axis]              
                 #For Reflective, scalars acts like zero grad, vectors need to flip sign
                 lower_vector_reflect_slices_pad = [*lower_slice] #  Copy over the padded slices
-                lower_vector_reflect_slices_pad[-1] = slice(target_idx, target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+                # The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+                lower_vector_reflect_slices_pad[0] = slice(target_idx, target_idx+1, None) # NOTE: Assumes variable index is first
                 lower_vector_reflect_slices_pad = tuple(lower_vector_reflect_slices_pad)
 
                 upper_vector_reflect_slices_pad = [*upper_slice] #  Copy over the padded slices
-                upper_vector_reflect_slices_pad[-1] = slice(target_idx,  target_idx+1, None)# The vectors need to be singled out. Only the normal component to the boundary needs to be flipped
+                upper_vector_reflect_slices_pad[0] = slice(target_idx,  target_idx+1, None) # NOTE: Assumes variable index is first
                 upper_vector_reflect_slices_pad = tuple(upper_vector_reflect_slices_pad)
+
 
             match left_bc:
                 case BoundaryCondition.ZERO_GRAD: # Just assign the first non-padded value to the padded region
@@ -468,6 +470,7 @@ class SimulationState:
                     if(has_vector_components):
                         # For vectors, need to flip sign
                         padded[lower_vector_reflect_slices_pad] *= -1
+
                 case _:
                     raise Exception("Unimplemented BC")
             match right_bc:
@@ -510,7 +513,7 @@ class SimulationState:
                 beta = self.metric.get_metric_product(self.grid_info , self.metric.construct_index(WhichCacheTensor.BETA, WeightType.CENTER),self.simulation_params)
                 inv_metric =  self.metric.get_metric_product(self.grid_info, self.metric.construct_index(WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER), self.simulation_params)
 
-                v_mag_2_padded = self.pad_array(v_mag_2, self.v_mag2_fixed_padded, VariableSet.VECTOR)
+                v_mag_2_padded = self.pad_array(v_mag_2, self.v_mag2_fixed_padded, VariableSet.SCALAR)
                 alpha_padded = self.pad_array( alpha, self.alpha_fixed_padded, VariableSet.SCALAR)
                 beta_padded = self.pad_array( beta, self.inverse_beta_fixed_padded, VariableSet.VECTOR)
                 inverse_metric_padded = self.pad_array(inv_metric , self.inverse_metric_fixed_padded, VariableSet.METRIC) #  NOTE: Going to treat metric as a scalar. Don't know how matrices should reflect...
@@ -589,7 +592,16 @@ class SimulationState:
                     flux_interface_unpadded = flux_interface[tuple(remove_ghost_slices)]
             #       flux_densitized = self.metric.weight_system(flux_interface, self.grid_info, WeightType.EDGE, self.simulation_params)
                     axis_weights = self.n_variable_dimensions*[WeightType.CENTER]
-                    axis_weights[spatial_index] = WeightType.EDGE
+                    if(self.n_variable_dimensions==1):
+                        axis_weights[0] = WeightType.EDGE
+                    else:
+                        match spatial_index:
+                            case 0:
+                                axis_weights[1] = WeightType.EDGE
+                            case 1:
+                                axis_weights[0] = WeightType.EDGE
+                            case _:
+                                axis_weights[spatial_index] = WeightType.EDGE
                     weights = self.metric.get_metric_product(self.grid_info,  self.metric.construct_index(WhichCacheTensor.DETERMINANT, tuple(axis_weights)), self.simulation_params)
                     flux_densitized = flux_interface_unpadded * weights
                     flux_interface_left = flux_densitized[slices_left]
@@ -598,7 +610,7 @@ class SimulationState:
                 # NOTE: Possible bug here with dt calculation. Only largest possible dt from all axes should be taken
                     possible_dt.append(self.calc_dt(alpha_plus, alpha_minus))
                     state_update += flux_change
-                dt = max(possible_dt)
+                dt = min(possible_dt)
                 exclude_axes = self.excluded_padding_axes(W_padded_cart, VariableSet.PRIMITIVE)
                 slices = [slice(1,-1, None)]*(W_padded_cart.ndim) # Remove ghost cells from padded grid
                 for axis in exclude_axes:

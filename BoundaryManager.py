@@ -1,4 +1,5 @@
 from enum import Enum 
+from CommonClasses import VariableSet
 
 class BoundaryCondition(Enum):
     FIXED = 0 
@@ -17,11 +18,14 @@ class BoundaryConditionManager:
         self.left_bcs = left_boundaries 
         self.right_bcs = right_boundaries 
 
-    def get_boundary_conds(self, index: int) -> tuple[BoundaryCondition,BoundaryCondition]:
-        if ( (index>=0) and (index < len(self.left_bcs))):
-            return (self.left_bcs[index], self.right_bcs[index])
-        else:
-            return (BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD) # Hack to deal with arrays like the metric tensor
+    def get_boundary_conds(self, index: int, var_set: VariableSet) -> tuple[BoundaryCondition,BoundaryCondition]:
+        match var_set:
+            case VariableSet.CONSERVATIVE | VariableSet.PRIMITIVE| VariableSet.VECTOR:
+                assert(index>=1)
+                assert(index<=len(self.left_bcs))             
+                return (self.left_bcs[index-1], self.right_bcs[index-1])
+            case _:
+                return (BoundaryCondition.ZERO_GRAD, BoundaryCondition.ZERO_GRAD)
 
 if __name__=="__main__":
     pass
