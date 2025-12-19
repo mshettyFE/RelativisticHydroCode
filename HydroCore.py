@@ -7,9 +7,9 @@ from BoundaryManager import BoundaryConditionManager, BoundaryCondition
 from metrics.Metric import Metric
 from metrics.Metric import METRIC_VARIABLE_INDEX , WhichCacheTensor
 from HelperFunctions import *
-from GuessPrimitives import *
 from EquationOfState import *
 from scipy.optimize import newton
+from typing import Self
 
 class SimulationState:
     U: npt.ArrayLike # Conservative Variables 
@@ -120,15 +120,57 @@ class SimulationState:
                 output[...,PrimitiveIndex.PRESSURE.value] =  pressure
                 return output
             case WhichRegime.RELATIVITY:
-                args = (U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                args = (U_cart_padded, self)
                 initial_guess = index_primitive_var(self.primitive_previous, PrimitiveIndex.PRESSURE, self.n_variable_dimensions)
                 initial_guess = np.maximum(initial_guess, 1e-10)
-                recovered_guess, converge, zero_er = newton(root_finding_func, initial_guess,args = args, full_output=True)
+                recovered_guess, converge, zero_der = newton(self.root_finding_func, initial_guess,args = args, full_output=True)
                 assert(np.all(converge))
-                out = construct_primitives_from_guess(recovered_guess, U_cart_padded, self.metric, self.simulation_params, self.grid_info, self.n_variable_dimensions)
+                out = self.construct_primitives_from_guess(recovered_guess, U_cart_padded)
                 return out
             case _:
                 raise Exception("Unimplemented relativistic regime")
+            
+    def root_finding_func(self, guess: npt.ArrayLike,
+                                U_cart: npt.ArrayLike, simulation_instance: Self) -> npt.NDArray:
+        flux = U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:]
+        flux_squared = simulation_instance.metric.three_vector_mag_squared(flux, self.grid_info, WeightType.CENTER, simulation_instance.simulation_params)
+        D = index_conservative_var(U_cart, ConservativeIndex.DENSITY, simulation_instance.n_variable_dimensions)
+        Tau = index_conservative_var(U_cart, ConservativeIndex.TAU, simulation_instance.n_variable_dimensions)
+        z = Tau+guess+D
+        z = np.maximum(z, 1e-12)
+        v_mag_2 = flux_squared/np.power(z,2)
+        v_mag_2 = np.minimum(v_mag_2, 1.0 - 1e-10)
+        W2 = np.power(1-v_mag_2,-1)
+        W = np.sqrt(W2)
+        epsilon = (Tau+D*(1-W)+guess*(1.0-W2))/(D*W)
+        epsilon = np.maximum(epsilon, 1e-10)
+        rho = D/W
+        guess_pressure = equation_of_state_epsilon(self.simulation_params, epsilon,rho )
+        out  = guess_pressure - guess
+        return out
+
+    def construct_primitives_from_guess(self, guess:npt.ArrayLike,
+                                        U_cart: npt.ArrayLike) -> npt.NDArray:
+        guess = np.maximum(guess, 1e-12) # Clamp guess to be physically valid
+        output = np.zeros(U_cart.shape)
+        flux = U_cart[...,ConservativeIndex.X_MOMENTUM_DENSITY.value:]
+        flux_squared = self.metric.three_vector_mag_squared(flux, self.grid_info, WeightType.CENTER, self.simulation_params)
+        D = index_conservative_var(U_cart, ConservativeIndex.DENSITY, self.n_variable_dimensions)
+        Tau = index_conservative_var(U_cart, ConservativeIndex.TAU, self.n_variable_dimensions)
+        z = Tau+guess+D
+        z = np.maximum(z, 1e-12)
+        v_mag_2 = flux_squared/np.power(z,2)
+        v_mag_2 = np.minimum(v_mag_2, 1.0 - 1e-10)
+        W2 = np.power(1-v_mag_2,-1)
+        W = np.sqrt(W2)
+        rho = D/W
+        velocities = ((flux.T)/(z.T)).T
+        rho = np.maximum(rho, 1e-12)
+        velocities = np.clip(velocities, -0.99999, 0.99999)
+        output[...,PrimitiveIndex.DENSITY.value] = rho
+        output[...,PrimitiveIndex.X_VELOCITY.value:] = velocities
+        output[...,PrimitiveIndex.PRESSURE.value] = guess
+        return output
         
     def update(self, which_axes : tuple = ()) -> tuple[np.float64, npt.NDArray]:
         # Undo scaling for input
@@ -522,8 +564,6 @@ class SimulationState:
         max_alpha = np.max( [alpha_plus, alpha_minus]) 
         deltas = np.asarray([np.min(self.grid_info.delta(i)) for i in range(self.n_variable_dimensions)])
         min_delta = np.min(deltas[deltas>0])
-        # if max_alpha > 1.0:
-        #             print(f"WARNING: Superluminal wave speed detected: {max_alpha}")
         return self.simulation_params.Courant*min_delta/max_alpha
 
 
