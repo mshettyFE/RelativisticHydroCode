@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import numpy.typing as npt
 from GridInfo import WeightType, GridInfo
 from enum import Enum
-from HelperFunctions import SimParams
+from CommonClasses import SimParams
 from typing import Tuple, List
 
 class METRIC_VARIABLE_INDEX(Enum):

@@ -44,20 +44,6 @@ class SimParams:
 
 ## Indexing variable tensors
 
-def index_conservative_var(U_cart: npt.ArrayLike, var_type: ConservativeIndex, n_variable_dims: int):
-    match n_variable_dims:
-        case 1:
-            max_allowed_index = ConservativeIndex.X_MOMENTUM_DENSITY
-        case 2:
-            max_allowed_index = ConservativeIndex.Y_MOMENTUM_DENSITY 
-        case 3:
-            max_allowed_index = ConservativeIndex.Z_MOMENTUM_DENSITY 
-        case _:
-            raise Exception("Unimplemented simulation dimension") 
-    if(var_type.value <= max_allowed_index.value):
-        return U_cart[...,var_type.value]
-    raise Exception("Trying to index momentum that is larger than the dimension of the problem") 
-
 def index_primitive_var( primitive: npt.NDArray, var_type: PrimitiveIndex, n_variable_dims: int):
     match n_variable_dims:
         case 1:

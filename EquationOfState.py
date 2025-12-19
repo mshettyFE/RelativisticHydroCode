@@ -1,5 +1,5 @@
-from HelperFunctions import *
-from HelperFunctions import SimParams
+from CommonClasses import *
+from CommonClasses import SimParams
 
 def equation_of_state_primitive(sim_params: SimParams, pressure: npt.ArrayLike, density: npt.ArrayLike) -> npt.NDArray[np.float64]:
     # Calculates internal energy as a function of pressure and density

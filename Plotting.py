@@ -6,7 +6,7 @@ from HydroCore import PrimitiveIndex, SimulationState
 from GridInfo import WeightType
 from metrics import Metric
 from EquationOfState import sound_speed
-from HelperFunctions import index_primitive_var, VariableSet
+from CommonClasses import index_primitive_var, VariableSet
 from matplotlib import colors
 
 def plot_results_1D(

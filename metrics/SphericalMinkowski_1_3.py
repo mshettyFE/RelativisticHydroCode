@@ -3,7 +3,7 @@ import numpy.typing as npt
 from GridInfo import WeightType, GridInfo
 from typing import Tuple, List
 from metrics.Metric import Metric, cached_array, METRIC_VARIABLE_INDEX
-from HelperFunctions import SimParams
+from CommonClasses import SimParams
 
 class SphericalMinkowski_1_3(Metric):
     dimension: np.float64  = None 

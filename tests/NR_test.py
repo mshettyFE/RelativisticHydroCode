@@ -1,7 +1,7 @@
 import unittest
 from HydroCore import SimulationState
 from MHD import SodShockInitialization, ImplosionInitialization
-from HelperFunctions import VariableSet, WhichRegime
+from CommonClasses import VariableSet, WhichRegime
 from numpy.testing import assert_allclose
 import pickle as pkl
 import os
