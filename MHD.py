@@ -95,7 +95,7 @@ def runSim1D(which_sim: Which1DTestProblem):
                 rho_r=0.125, v_r=0.0, P_r=0.1,
                Courant=0.5, Gamma=1.4, N_cells=1000, t_max=0.1) 
         case Which1DTestProblem.SR_CARTESIAN_SOD:
-            save_frequency = 1
+            save_frequency =1
             which_axes = ()
             state_sim =  SodShockInitialization(
                 rho_l=10.0, v_l=0.0, P_l=40/3,
@@ -178,13 +178,13 @@ if __name__ == "__main__":
     # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
-    Plotting.plot_1D_anim("1D_SodShock.pkl")
+    # Plotting.plot_1D_anim("1D_SodShock.pkl")
     # # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
     # runSim1D(Which1DTestProblem.BONDI_PROBLEM)
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
-    # Plotting.plot_2D_anim("high_fidelity_2D.pkl")
+    Plotting.plot_2D_anim("high_fidelity_2D.pkl")
 #    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
-    # Plotting.plot_2D(time_slice=150)
+    # Plotting.plot_2D("high_fidelity_2D.pkl", time_slice=400)
 #    Plotting.plot_2D_anim()

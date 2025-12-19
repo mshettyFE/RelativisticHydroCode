@@ -125,8 +125,9 @@ def plot_2D_anim(
 
     frame_indices = list(range(0, len(data), 100))
     ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=False)
+    ani.save("2D_animation.gif", writer='imagemagick')
 
-    plt.show()
+#    plt.show()
 
 def plot_1D_anim(
     input_pkl_file: str = "snapshot.pkl"   
@@ -152,8 +153,6 @@ def plot_1D_anim(
 
     frame_indices = list(range(0, len(data), 100))
     ani = FuncAnimation(fig, update, frames=frame_indices, interval=100, blit=False)
-
-    plt.show()
 
 def plot_2D(
     input_pkl_file: str = "snapshot.pkl"  ,
