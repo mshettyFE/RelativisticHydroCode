@@ -8,9 +8,7 @@ from CommonClasses import SimParams
 class CartesianMinkowski_1_2(Metric):
     dimension: np.float64  = None 
     cached_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_metric_edge: cached_array  = cached_array(None, WeightType.EDGE)
     cached_inv_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_inv_metric_edge: cached_array  = cached_array(None, WeightType.EDGE)
     cached_determinant_center:  cached_array  = cached_array(None, WeightType.CENTER)
     cached_determinant_edge: cached_array = cached_array(None, WeightType.EDGE)
     cached_partial_der_metric_center: cached_array  = cached_array(None, WeightType.CENTER)

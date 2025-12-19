@@ -11,7 +11,6 @@ from metrics.CartesianMinkowski_1_1 import CartesianMinkowski_1_1
 from metrics.CartesianMinkowski_1_2 import CartesianMinkowski_1_2
 from metrics.SphericalMinkowski_1_3 import SphericalMinkowski_1_3
 from CommonClasses import *
-import sys
 
 def save_results(
         history: list[tuple[np.float64, npt.NDArray]],
@@ -177,8 +176,8 @@ if __name__ == "__main__":
 #    np.set_printoptions(threshold=sys.maxsize)
 #    playground = ImplosionInitialization(t_max = 2.5, N_cells = 100)
     # runSim1D(Which1DTestProblem.CARTESIAN_SOD)
-    Plotting.plot_results_1D()
-    runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
+    # Plotting.plot_results_1D()
+    # runSim1D(Which1DTestProblem.SR_CARTESIAN_SOD)
     # Plotting.plot_results_1D()
     # # runSim1D(Which1DTestProblem.HARDER_SOD)
     # Plotting.plot_results_1D()
@@ -186,5 +185,5 @@ if __name__ == "__main__":
     # Plotting.plot_results_1D("snapshot.pkl",title="Bondi Accretion", filename="BondiAccretion.png", xlabel="r", show_mach=True, which_slice=10)
     # runSim2D(Which2DTestProblem.SR_IMPLOSION_TEST)
     # Plotting.plot_2D_anim()
-    # runSim2D(Which2DTestProblem.IMPLOSION_TEST)
+    runSim2D(Which2DTestProblem.IMPLOSION_TEST)
     # Plotting.plot_2D_anim()

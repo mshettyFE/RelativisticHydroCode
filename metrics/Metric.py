@@ -31,9 +31,7 @@ class cached_array:
 class Metric(ABC):
     dimension: np.float64  = None 
     cached_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_metric_edge: cached_array  = cached_array(None, WeightType.EDGE)
     cached_inv_metric_center:  cached_array  = cached_array(None, WeightType.CENTER)
-    cached_inv_metric_edge: cached_array  = cached_array(None, WeightType.EDGE)
     cached_determinant_center:  cached_array  = cached_array(None, WeightType.CENTER)
     cached_determinant_edge: cached_array = cached_array(None, WeightType.EDGE)
     cached_partial_der_metric_center: cached_array  = cached_array(None, WeightType.CENTER)
@@ -49,9 +47,7 @@ class Metric(ABC):
         assert(self.dimension >=2) # Need at least 1+1 formulation
         cases = [
             (WhichCacheTensor.METRIC, WeightType.CENTER),
-            (WhichCacheTensor.METRIC, WeightType.EDGE),
             (WhichCacheTensor.INVERSE_METRIC, WeightType.CENTER),
-            (WhichCacheTensor.INVERSE_METRIC, WeightType.EDGE),
             (WhichCacheTensor.DETERMINANT, WeightType.CENTER),
             (WhichCacheTensor.DETERMINANT, WeightType.EDGE),
             (WhichCacheTensor.PARTIAL_DER, WeightType.CENTER),
@@ -98,22 +94,10 @@ class Metric(ABC):
                         output =  ("Unimplemented tensor product from metric", False)
             case WeightType.EDGE:
                 match which_cache:
-                    case WhichCacheTensor.METRIC:
-                        output = (self.cached_metric_edge, True)
-                    case WhichCacheTensor.INVERSE_METRIC:
-                        output = (self.cached_inv_metric_edge, True)
                     case WhichCacheTensor.DETERMINANT:
                         output = (self.cached_determinant_edge, True)
-                    case WhichCacheTensor.PARTIAL_DER:
-                        output =  ("You shouldn't need to calculate metric partial derivatives on cell boundaries", False)
-                    case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                        output =  ("You shouldn't need to calculate Chistoffel symbols on cell boundaries", False)
-                    case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                        output =  ("You shouldn't need to calculate partial ln alpha on cell boundaries", False)
-                    case WhichCacheTensor.ALPHA:
-                        output =  ("You shouldn't need to calculate alpha on cell boundaries", False)
                     case _:
-                        output =  ("Unimplemented tensor product from metric", False)
+                        output =  ("Unimplemented tensor product from metric on edge", False)
             case _:
                 output = ("Invalid weight type", False)
         # Output can possibly be (None, True). Need to handle that case
@@ -181,25 +165,11 @@ class Metric(ABC):
                         return ("Unimplemented tensor product from metric", False)
             case WeightType.EDGE:
                 match which_cache:
-                    case WhichCacheTensor.METRIC:
-                        self.cached_metric_edge.array = new_tensor
-                        return(self.cached_metric_edge, True)
-                    case WhichCacheTensor.INVERSE_METRIC:
-                        self.cached_inv_metric_edge.array = new_tensor
-                        return (self.cached_inv_metric_edge, True)
                     case WhichCacheTensor.DETERMINANT:
                         self.cached_determinant_edge.array = new_tensor
                         return (self.cached_determinant_edge, True)
-                    case WhichCacheTensor.PARTIAL_DER:
-                        return  ("YOu shouldn't need to calculate metric partial derivatives on cell boundaries", False)
-                    case WhichCacheTensor.CHRISTOFFEL_UPPER0:
-                        return ("YOu shouldn't need to calculate Chistoffel symbols on cell boundaries", False)
-                    case WhichCacheTensor.PARTIAL_LN_ALPHA:
-                        return ("YOu shouldn't need to calculate partial ln alpha on cell boundaries", False)
-                    case WhichCacheTensor.ALPHA:
-                        return ("YOu shouldn't need to calculate alpha on cell boundaries", False)
                     case _:
-                        return ("Unimplemented tensor product from metric", False)
+                        return ("Unimplemented tensor product from metric on edge", False)
             case _:
                 return ("Invalid weight type", False)
 
